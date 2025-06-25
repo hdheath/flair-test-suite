@@ -6,26 +6,118 @@ A testing pipeline to:
 - **FLAIR Correct** with user inputted options
 - **Slice** input data into user inputted region-specific files  
 - **FLAIR Collapse** each region with user inputted options  
-- **QC** with SQANTI3 and **plot** results  
-- **QC** with TED and **plot** results  
+- **FLAIR Collapse QC** with SQANTI3 and **plot** results  
+- **FLAIR Collapse QC** with TED and **plot** results  
+- **FLAIR Quantify** each collapse run with user inputted options  
+- **FLAIR Quantify QC** 
 
 ---
 
-## Steps
+## Pipeline Workflow
 
-**FLAIR Align**
+### **FLAIR Align**
 
-**FLAIR Correct**
+**Inputs:**
+- `reference.fasta`
+- `reads.fasta`
 
-**Slice**
+**Outputs:**
+- `aligned.bed`
+- `aligned.bam`
+- `reads.fasta`
 
-**FLAIR Collapse**
+---
 
-**QC**
+### **FLAIR Correct**
+
+**Inputs:**
+- `aligned.bed`
+- `aligned.bam`
+- `reference.fasta`
+- *optional*: `reference.gtf`
+- *optional*: `reference_splice_junctions.txt`
+
+**Outputs:**
+- `corrected_reads.fasta`
+- `corrected_aligned.bed`
+- `corrected_aligned.bam`
+
+---
+
+### **Slice**
+
+**Inputs:**
+- Region(s) of interest: `chr:start-end`
+- `reads.fasta`
+- `corrected_aligned.bed`
+- `corrected_aligned.bam`
+- *optional*: `reference.gtf`
+- *optional*: TSS/TTS BED files (reference or experimental)
+
+**Outputs:**
+- Sliced files of each region from the input files  
+  **Note:** Only features *fully contained* within the given region of interest will be included in the output file
+
+---
+
+### **FLAIR Collapse**
+
+**Inputs:**
+- `reference.fasta`
+- Sliced `reference.gtf`
+- Sliced, corrected, aligned `bed` file
+- Sliced, corrected, aligned `reads.fasta` file
+
+**Outputs:**
+- (TBD)
+
+---
+
+### **Collapse QC – SQANTI**
+
+**Inputs:**
+- (TBD)
+
+**Outputs:**
+- (TBD)
+
+---
+
+### **Collapse QC – TED**
+
+**Inputs:**
+- (TBD)
+
+**Outputs:**
+- (TBD)
+
+---
+
+### **FLAIR Quantify**
+
+**Inputs:**
+- (TBD)
+
+**Outputs:**
+- (TBD)
+
+---
+
+### **Quantify QC**
+
+**Inputs:**
+- (TBD)
+
+**Outputs:**
+- (TBD)
+
+
+
+## Pipeline Workflow Schematic 
 
 
 ## Example Directory Layout
-
+```plaintext
 flair-test-suite/
 ├── config/
 │   └── manifest.py
@@ -96,71 +188,8 @@ flair-test-suite/
         └── [optional] reference TSS/TTS bed file(s)
         └── [optional] experiment TSS/TTS bed file(s)
         └── [optional] reference splice junction bed file
+```
 
-
-
-
-
-
-## Pipeline Workflow Schematic 
-**convert this to bullet lists** 
-                ┌─────────────────────────────────┐
-                │      scripts/driver.py         │
-                └──────────────┬──────────────────┘
-                               ▼
-╔═══════════════════════╗    1) slice_all_regions(cfg)   ╔══════════════════════╗
-║  config/manifest.yaml ║ ──────────────────────────────▶║ outputs/regions/      ║
-╚═══════════════════════╝                                 ║ └─ chr20_3218000_3250000/  ║
-                                                          ║     ├─ chr20_3218000-3250000.bam   ║
-                                                          ║     ├─ chr20_3218000-3250000.bed   ║
-                                                          ║     ├─ … (.gtf, .fasta, .5prime.bed)║
-                                                          ╚══════════════════════════════════╝
-                                                               │
-                                                               ▼
-                                                    2) parse_all_regions(…)
-                                                               │
-                                                          ╔═════════════════════╗
-                                                          ║ outputs/regions/…   ║
-                                                          ║ └─ chr…/            ║
-                                                          ║     ├─ gene_summary.csv      ║
-                                                          ║     └─ transcript_summary.csv║
-                                                          ╚═════════════════════╝
-                                                               │
-                                                               ▼
-                                                    3) collapse_all_regions(cfg)
-                                                               │
-                                                          ╔════════════════════════╗
-                                                          ║ outputs/results/       ║
-                                                          ║ └─ chr20_…_/           ║
-                                                          ║     ├─ default/        ║
-                                                          ║     │   └─ *.isoforms.gtf   ║
-                                                          ║     └─ <flag_combo>/   ║
-                                                          ╚════════════════════════╝
-                                                               │
-                                                               ▼
-                                       (Optional) 4) SQANTI QC & summary
-                                                               │
-                                                          ╔══════════════════════╗
-                                                          ║ outputs/results/…    ║
-                                                          ║ └─ chr…_/            ║
-                                                          ║     └─ <run>/        ║
-                                                          ║         ├─ *_classification.txt  ║
-                                                          ║         └─ sqanti_results.tsv    ║
-                                                          ║ outputs/logs/sqanti/              ║
-                                                          ║ └─ <run>/                       ║
-                                                          ║     ├─ sqanti.log               ║
-                                                          ║     └─ errors.log               ║
-                                                          ╚══════════════════════╝
-                                                               │
-                                                               ▼
-                                       (Optional) 5) SQANTI Plotting
-                                                               │
-                                                          ╔══════════════════════╗
-                                                          ║ outputs/plots/       ║
-                                                          ║ └─ chr…_/            ║
-                                                          ║     └─ <run>/        ║
-                                                          ║         └─ sqanti.png       ║
-                                                          ╚══════════════════════╝
 
 ## Extending & Testing
 
