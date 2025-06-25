@@ -28,9 +28,9 @@ A testing pipeline to:
 
 flair-test-suite/
 ├── config/
-│   └── manifest.py            # pipeline parameters as a Python dict
+│   └── manifest.py
 ├── src/
-│   └── flair_automate/        # core library
+│   └── flair_automate/
 │       ├── __init__.py
 │       ├── flair_align_automation.py
 │       ├── flair_correct_automation.py
@@ -40,68 +40,64 @@ flair-test-suite/
 │       ├── sqanti_runner.py
 │       └── sqanti_plot.py
 ├── scripts/
-│   └── flair_test_suite.py    # top-level “run everything” CLI
-├── outputs/                   # all generated data
-│   ├── align/                 # FLAIR-align outputs
-│   │   └── <sample>/
-│   │       └── align1/        # or “default” if no flags, or a name derived from flags
-│   │           ├── <sample>.bam
-│   │           └── <sample>.bed
-│   ├── correct/               # FLAIR-correct outputs
-│   │   └── <sample>/
-│   │       └── <align_run>/   
-│   │           └── <corr_run>/     # or name derived from flags
-│   │               ├── <sample>.corrected.bam
-│   │               └── <sample>.corrected.bed
-│   ├── regions/               # per-region slices for every sample/run
-│   │   └── chr20_3218000_3250000/
-│   │       └── <sample>/
-│   │           └── <corr_run>/  
-│   │               ├── chr20_3218000-3250000.bam
-│   │               ├── chr20_3218000-3250000.bed
-│   │               ├── chr20_3218000-3250000.gtf
-│   │               ├── chr20_3218000-3250000.fasta
-│   │               ├── chr20_3218000-3250000.exp5.bed
-│   │               ├── chr20_3218000-3250000.exp3.bed
-│   │               ├── chr20_3218000-3250000.ref5.bed
-│   │               └── chr20_3218000-3250000.ref3.bed
-│   ├── results/               # FLAIR-collapse isoforms
-│   │   └── chr20_3218000_3250000/
-│   │       └── <sample>/
-│   │           └── <corr_run>/
-│   │               ├── <collapse_run>/                       # or named by collapse flags
-│   │               │   ├── *.isoforms.gtf
-│   │               │   └── *.isoforms.bed
-│   │               └── <collapse_run>/ # example flag-derived name
-│   │                   ├── *.isoforms.gtf
-│   │                   └── *.isoforms.bed
-│   ├── logs/                  # timing & error logs
-│   │   ├── chr20_3218000_3250000/
-│   │   │   └── <sample>/
-│   │   │       └── <corr_run>/
-                    correct.time.log
-│   │   │           └── <collapse_run>/              # e.g. “default”
-│   │   │               └── collapse.time.log
-│   │   └── sqanti/            # SQANTI errors
-│   │       └── chr20_3218000_3250000/
-│   │           └── <sample>/
-│   │               └── <corr_run>/
-│   │                 └── <collapse_run>/
-│   │                       └── sqanti_error.log
-│   └── plots/                 # SQANTI QC figures
-│       └── chr20_3218000_3250000/
-│           └── <sample>/
-│               └── <corr_run>/
-│                    └── <collapse_run>/
-│                             └── region_metrics.png
-│                             └── sqanti.png
-│                             └── sqanti_summary.tsv
-│                             └── ted.png
-│                             └── ted_summary.tsv
+│   └── flair_test_suite.py
+├── outputs/
+│   └── <sample>/                                # organism, fasta, version
+│       └── run_<align_id>[_<corr_id>]/          # Alignment settings, Correct settings
+│           ├── align/                                 # FLAIR align output 
+│           │   ├── <sample>.bam
+│           │   └── <sample>.bed
+│           │
+│           ├── correct/                               # FLAIR correct output
+│           │   ├── <sample>.corrected.bam
+│           │   └── <sample>.corrected.bed
+│           │
+│           ├── regions/                               # sliced files used for FLAIR collapse and FLAIR quantify runs
+│           │   └── chr20_3218000_3250000/
+│           │       ├── raw/                               
+│           │       │   ├── chr20…-3250000.bam
+│           │       │   ├── chr20…-3250000.bed
+│           │       │   ├── chr20…-3250000.gtf
+│           │       │   ├── chr20…-3250000.fasta
+│           │       │   ├── chr20…-3250000.exp5.bed
+│           │       │   └── …  
+│           │       │
+│           │       ├── collapse/                           # FLAIR collapse per-region, using different options 
+│           │       │   └── collapse_<flags>/
+│           │       │       ├── *.isoforms.gtf
+│           │       │       └── *.isoforms.bed
+│           │       │
+│           │       ├── collapse_qc/                        # FLAIR collapse QC for this region across all runs 
+│           │       │   ├── sqanti_summary.tsv
+│           │       │   ├── sqanti.png
+│           │       │   ├── ted_summary.tsv
+│           │       │   ├── ted.png
+│           │       │   └── region_metrics.png
+│           │       │
+│           │       └── quantify_<flags>/                   # FLAIR quantify per-region, using different options 
+│           │           ├── isoform_tpm.tsv
+│           │           └── gene_counts.tsv
+│           │       └── quantify_qc/                        # FLAIR quantify QC for this region across all runs 
+│           │           ├── flair_quantify_metrics.png
+│           │           
+│           │
+│           └── logs/
+│               ├── align.time.log
+│               ├── correct.time.log
+│               ├── collapse.time.log
+│               ├── quantify.time.log
+│               ├── ted.time.log
+│               └── sqanti_error.log
 └── tests/
-    └── data/                  # data for unit tests
+    └── data/
         ├── sample.gtf
         └── sample_reads.fastq
+        └── reference.fastq
+        └── [optional] reference TSS/TTS bed file(s)
+        └── [optional] experiment TSS/TTS bed file(s)
+        └── [optional] reference splice junction bed file
+
+
 
 
 
