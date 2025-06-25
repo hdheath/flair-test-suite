@@ -68,6 +68,59 @@ flair-test-suite/
 
 ---
 
+### Adding a New FLAIR Align Option Set
+
+**Before:**
+
+```python
+    "align_options": [
+        {"--threads": 12},
+    ],
+```
+
+**After:**
+
+```python
+    "align_options": [
+        {
+            "--threads": 12
+        },
+        {
+            "--threads": 12,
+            "--nvrna": True,
+        },
+    ],
+```
+
+### Adding a New FLAIR Correct Option Set
+
+**Before:**
+
+```python
+    "correct_options": [
+        {
+            "--threads": 12,
+            "--junc":    os.path.join(DATA_ROOT, "WTC11", "WTC11_all.SJ.out.tab"),
+        },
+    ],
+```
+
+**After:**
+
+```python
+    "correct_options": [
+        {
+            "--threads": 12,
+            "--junc":    os.path.join(DATA_ROOT, "WTC11", "WTC11_all.SJ.out.tab"),
+        },
+        {
+            "--threads": 12,
+            "--junc":    os.path.join(DATA_ROOT, "WTC11", "WTC11_all.SJ.out.tab"),
+            "--ss_window" : 5,
+        },
+    ],
+```
+
 ### Adding a New FLAIR Collapse Option Set
 
 **Before:**
