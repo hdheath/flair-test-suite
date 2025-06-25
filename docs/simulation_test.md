@@ -16,6 +16,7 @@ A testing pipeline to:
 ## Pipeline Workflow
 
 ### **FLAIR Align**
+**Note - this is only ran for version <3**
 
 **Inputs:**
 - `reference.fasta`
@@ -29,6 +30,7 @@ A testing pipeline to:
 ---
 
 ### **FLAIR Correct**
+**Note - this is only ran for version <3**
 
 **Inputs:**
 - `aligned.bed`
@@ -38,7 +40,6 @@ A testing pipeline to:
 - *optional*: `reference_splice_junctions.txt`
 
 **Outputs:**
-- `corrected_reads.fasta`
 - `corrected_aligned.bed`
 - `corrected_aligned.bam`
 
@@ -179,7 +180,8 @@ flair-test-suite/
 │               ├── collapse.time.log
 │               ├── quantify.time.log
 │               ├── ted.time.log
-│               └── sqanti_error.log
+│               ├── sqanti_error.log
+│               └── quantify_qc.log
 └── tests/
     └── data/
         ├── sample.gtf
