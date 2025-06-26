@@ -195,15 +195,6 @@ flair-test-suite/
 
 ## Extending & Testing
 
-* add analysis to pipeline
-   * need to downlaod sqanti to flair env : run sqanti w/ per region plot 
-      * save to results/region/run_name/sqanti_results.tsv and plots/region/run_name/sqanti.png
-   * TED w/ per region plot - compare with gtf metrics - parallel coordinate map on top of box plots
-      * save to results/region/run_name/ted_results.tsv and plots/region/run_name/ted.png
-* make fasta reads generator faster (wont need this with new version)
-* make testing for flair dev (new flair automation py)
-* Add new regions to `config/manifest.yaml`.
-* Update `tests/data/` fixtures for unit/integration tests.
-* Run `pytest` to verify functions and end-to-end behavior.
-* create optional plotting of regions
+* add directions for adding new things to manifest
+* think about nextflow implementation 
 

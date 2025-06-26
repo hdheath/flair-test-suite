@@ -10,17 +10,20 @@ This section defines conventions used across the repo
 
 ## Master Data Directory
 
-Where full input data files are stored.
+All full input datasets should be stored under:
 
 (TBD).
 
-### Expected Input Format
+---
 
-Organize and name experiment folders using this format:
+### Expected Directory Name Format
+
+Each experiment should follow a naming convention that includes organism, reference annotation, sample name, sequencing platform, and optional 5' or 3' protocol descriptors.
 
 ```
 <organism>_<reference>_<sample>_<sequencing>_<5pseq>_<3pseq>
 ```
+---
 
 ### Example Data Directory Layout
 
@@ -47,112 +50,26 @@ flair-test-suite/
 
 ## Editing the Manifest
 
-### Adding a New Region
-
-**Before:**
-
-```python
-"regions": {
-    "chr20": ["3218000:3250000"],
-},
-```
-
-**After:**
-
-```python
-"regions": {
-    "chr20": ["3218000:3250000"],
-    "chr12": ["4118030:5240000"],
-},
-```
+The manifest file defines what regions and pipeline settings to use. You can extend its scope by adding new entries to any of the following sections.
 
 ---
 
-### Adding a New FLAIR Align Option Set
+### Adding a New Region
 
-**Before:**
+Each chromosome key maps to a list of coordinate ranges in the format "chr:start-end". Each cooridinate range will be processed independently.
 
-```python
-    "align_options": [
-        {"--threads": 12},
-    ],
-```
+To add a new genomic region for processing :
+- Locate the `regions` section in your manifest file
+- Add a new dictionary to the existing coordinate range list of dictionaries with your desired range. (ex : `{chr1:140000-150000}`)
 
-**After:**
+---
 
-```python
-    "align_options": [
-        {
-            "--threads": 12
-        },
-        {
-            "--threads": 12,
-            "--nvrna": True,
-        },
-    ],
-```
+### Adding a New FLAIR Option Set (Align, Correct, Collapse, Quantify)
 
-### Adding a New FLAIR Correct Option Set
+The manifest includes separate lists for different stages of the FLAIR pipeline: `align_options`, `correct_options`,`collapse_options`, `quantify_options`. Each list contains dictionaries, where each dictionary specifies a distinct set of flags for that step.
 
-**Before:**
+To add a new configuration to any of these stages:
+- Append a new dictionary with the desired flags to the appropriate list.
+- Each configuration will trigger an independent run of the relevant FLAIR stage.
 
-```python
-    "correct_options": [
-        {
-            "--threads": 12,
-            "--junc":    os.path.join(DATA_ROOT, "WTC11", "WTC11_all.SJ.out.tab"),
-        },
-    ],
-```
-
-**After:**
-
-```python
-    "correct_options": [
-        {
-            "--threads": 12,
-            "--junc":    os.path.join(DATA_ROOT, "WTC11", "WTC11_all.SJ.out.tab"),
-        },
-        {
-            "--threads": 12,
-            "--junc":    os.path.join(DATA_ROOT, "WTC11", "WTC11_all.SJ.out.tab"),
-            "--ss_window" : 5,
-        },
-    ],
-```
-
-### Adding a New FLAIR Collapse Option Set
-
-**Before:**
-
-```python
-"collapse_options": [
-    {
-        "--version":      2,
-        "--support":      1,
-        "--check_splice": True,
-        "--filter":       "stringent",
-        "--threads":      8,
-    },
-],
-```
-
-**After:**
-
-```python
-"collapse_options": [
-    {
-        "version":        2,
-        "--support":      1,
-        "--check_splice": True,
-        "--filter":       "stringent",
-        "--threads":      8,
-    },
-    {
-        "version":        3,
-        "--support":      3,
-        "--filter":       "best-only",
-        "--threads":      8,
-    },
-],
-```
+---
