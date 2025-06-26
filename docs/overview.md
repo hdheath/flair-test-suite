@@ -1,103 +1,25 @@
 # FLAIR Test Suite Overview
 
-This repository provides tools and test suites for running and benchmarking different versions of the FLAIR long-read transcriptome analysis pipeline—including alignment, correction, collapse, and quantification. It is designed to support reproducible evaluation of transcript detection methods across a variety of organisms, sequencing protocols, and parameter configurations.
+A framework for reproducible, version-aware benchmarking and development of FLAIR.
+
+## 1. Purpose
+Compare isoform annotation and quantification across new and exisiting FLAIR releases, sequencing protocols, and genomic regions.
+
+## 2. Getting Started
+1. **Data**: drop your FASTA/GTF/BED files into `tests/data/<dataset_name>/`.  
+2. **Config**: edit `manifest.py` to point at your data folder, define regions, and list the FLAIR parameter sets you want to test.
+
+## 3. What It Does
+- **Align** reads to the genome  
+- **Correct** alignments w/wo splice-junction evidence  
+- **Collapse** isoforms into transcript models  
+- **Quantify** expression per isoform  
+
+Each stage runs once per parameter set, per region(s)
+
+## 4. Customization & Extension
+- **Add more datasets** by creating new `tests/data/<name>/` folders.  
+- **Test new FLAIR versions** by appending entries to `align_options`, `correct_options`, etc., each with its own `version`, `env`, and `flags`.  
+- **Add new regions** by adding `{ "chrX": ["start:end"] }` to the `regions` list.
 
 ---
-
-## Glossary of Terms
-
-This section defines conventions used across the repo 
-
-(TBD).
-
----
-
-
-## Master Data Directory
-
-All full input datasets should be stored under:
-
-(TBD).
-
----
-
-### Expected Directory Name Format
-
-Each experiment should follow a naming convention that includes organism, reference annotation, sample name, sequencing platform, and optional 5' or 3' protocol descriptors.
-
-```
-<organism>_<reference>_<sample>_<sequencing>_<5pseq>_<3pseq>
-```
----
-
-### Example Data Directory Layout
-
-```plaintext
-flair-test-suite/
-└── tests/
-    └── data/
-        └── human_GENCODEv48_WTC11_PacBio_CAGE_QuantSeq/
-            ├── sample.gtf
-            ├── sample_reads.fastq
-            ├── reference.fastq
-            ├── reference TSS/TTS BED file(s)
-            ├── experiment TSS/TTS BED file(s)
-            └── reference splice junction BED file
-        └── human_GENCODEv48_WTC11_Nanopore/
-            ├── sample.gtf
-            ├── sample_reads.fastq
-            ├── reference.fastq
-            ├── reference TSS/TTS BED file(s)
-            └── reference splice junction BED file
-```
-
-## Manifest File
-
-
-The manifest file defines what version of FLAIR, regions, and pipeline settings to use.
-
-Open `manifest.py` to define:
-
-1. **datasets**: subfolder names → expected filenames.  
-2. **regions**: a list of `{ "chrN": ["start:end", …] }` dicts.  
-3. **stage options** (`align_options`, `correct_options`, `collapse_options`, `quantify_options`):  
-   - Each entry must include  
-     - `version`: FLAIR release (e.g. `"3.0.0"`)  
-     - `env`: corresponding conda env (e.g. `"flair-v3"`)  
-     - `aligner` : which alignment software was used (Version >= 3)
-     - `flags`: a dict of CLI arguments supported by that version  
-
-Appending extra configs automatically spawns independent runs for each parameter set.
-
----
-
-### Adding a New Version
-
-(TBD)
-
----
-
-### Adding a New Region
-
-Each chromosome key maps to a list of coordinate ranges in the format "chr:start-end". Each cooridinate range will be processed independently.
-
-To add a new genomic region for processing :
-- Locate the `regions` section in your manifest file
-- Add a new dictionary to the existing coordinate range list of dictionaries with your desired range. (ex : `{chr1:140000-150000}`)
-
----
-
-### Adding a New FLAIR Option Set (Align, Correct, Collapse, Quantify)
-
-The manifest includes separate lists for different stages of the FLAIR pipeline: `align_options`, `correct_options`,`collapse_options`, `quantify_options`. Each list contains dictionaries, where each dictionary specifies a distinct set of flags for that step.
-
-To add a new configuration to any of these stages:
-- Append a new dictionary with the desired flags to the appropriate list.
-- Each configuration will trigger an independent run of the relevant FLAIR stage.
-
----
-
-## Extending & Testing
-
-* add directions for adding new things to manifest
-* think about nextflow implementation 
