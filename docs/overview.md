@@ -1,5 +1,7 @@
 # Overview
 
+This repository contains tools and test suites for benchmarking and running the FLAIR long-read transcriptome analysis pipeline, including alignment, correction, collapse, and quantification. It is designed to facilitate reproducible evaluation of transcript detection methods across various organisms, protocols, and parameter sets.
+
 ## Glossary of Terms
 
 This section defines conventions used across the repo 
