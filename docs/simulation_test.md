@@ -16,7 +16,7 @@ A testing pipeline to:
 ## Pipeline Workflow
 
 ### **FLAIR Align**
-**Note - this is only ran for version <3**
+**Note - this is only ran for version < 3 - newer FLAIR versions allow users to choose their alignment method**
 
 **Inputs:**
 - `reference.fasta`
@@ -30,7 +30,7 @@ A testing pipeline to:
 ---
 
 ### **FLAIR Correct**
-**Note - this is only ran for version <3**
+**Note - this is only ran for version < 3, correct is within newer FLAIR versions' collapse command**
 
 **Inputs:**
 - `aligned.bed`
@@ -63,11 +63,18 @@ A testing pipeline to:
 
 ### **FLAIR Collapse**
 
-**Inputs:**
+**Inputs for version < 3**
 - `reference.fasta`
 - Sliced `reference.gtf`
 - Sliced, corrected, aligned `bed` file
 - Sliced, corrected, aligned `reads.fasta` file
+- [optional] sliced junctions tab file 
+
+**Inputs for version >= 3**
+- `reference.fasta`
+- Sliced `reference.gtf`
+- Sliced, `bam` file
+- [optional] sliced junctions tab file 
 
 **Outputs:**
 - (TBD)
@@ -192,9 +199,4 @@ flair-test-suite/
         └── [optional] reference splice junction bed file
 ```
 
-
-## Extending & Testing
-
-* add directions for adding new things to manifest
-* think about nextflow implementation 
 

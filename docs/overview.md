@@ -64,6 +64,7 @@ Open `manifest.py` to define:
    - Each entry must include  
      - `version`: FLAIR release (e.g. `"3.0.0"`)  
      - `env`: corresponding conda env (e.g. `"flair-v3"`)  
+     - `aligner` : which alignment software was used (Version >= 3)
      - `flags`: a dict of CLI arguments supported by that version  
 
 Appending extra configs automatically spawns independent runs for each parameter set.
@@ -95,3 +96,8 @@ To add a new configuration to any of these stages:
 - Each configuration will trigger an independent run of the relevant FLAIR stage.
 
 ---
+
+## Extending & Testing
+
+* add directions for adding new things to manifest
+* think about nextflow implementation 
