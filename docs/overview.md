@@ -6,7 +6,7 @@ A framework for reproducible, version-aware benchmarking and development of FLAI
 Compare isoform annotation and quantification across new and exisiting FLAIR releases, sequencing protocols, and genomic regions.
 
 ## 2. Getting Started
-1. **Data**: drop your FASTA/GTF/BED files into `tests/data/<dataset_name>/`.  
+1. **Data**: drop your FASTA/GTF/BED/BAM files into `tests/data/<dataset_name>/`.  
 2. **Config**: edit `manifest.py` to point at your data folder, define regions, and list the FLAIR parameter sets you want to test.
 
 ## 3. What It Does
