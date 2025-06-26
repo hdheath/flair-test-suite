@@ -1,6 +1,8 @@
-# Overview
+# FLAIR Test Suite Overview
 
-This repository contains tools and test suites for benchmarking and running the FLAIR long-read transcriptome analysis pipeline, including alignment, correction, collapse, and quantification. It is designed to facilitate reproducible evaluation of transcript detection methods across various organisms, protocols, and parameter sets.
+This repository provides tools and test suites for running and benchmarking different versions of the FLAIR long-read transcriptome analysis pipeline—including alignment, correction, collapse, and quantification. It is designed to support reproducible evaluation of transcript detection methods across a variety of organisms, sequencing protocols, and parameter configurations.
+
+---
 
 ## Glossary of Terms
 
@@ -9,6 +11,7 @@ This section defines conventions used across the repo
 (TBD).
 
 ---
+
 
 ## Master Data Directory
 
@@ -48,11 +51,28 @@ flair-test-suite/
             └── reference splice junction BED file
 ```
 
+## Manifest File
+
+
+The manifest file defines what version of FLAIR, regions, and pipeline settings to use.
+
+Open `manifest.py` to define:
+
+1. **datasets**: subfolder names → expected filenames.  
+2. **regions**: a list of `{ "chrN": ["start:end", …] }` dicts.  
+3. **stage options** (`align_options`, `correct_options`, `collapse_options`, `quantify_options`):  
+   - Each entry must include  
+     - `version`: FLAIR release (e.g. `"3.0.0"`)  
+     - `env`: corresponding conda env (e.g. `"flair-v3"`)  
+     - `flags`: a dict of CLI arguments supported by that version  
+
+Appending extra configs automatically spawns independent runs for each parameter set.
+
 ---
 
-## Editing the Manifest
+### Adding a New Version
 
-The manifest file defines what regions and pipeline settings to use. You can extend its scope by adding new entries to any of the following sections.
+(TBD)
 
 ---
 

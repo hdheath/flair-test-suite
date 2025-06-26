@@ -1,4 +1,4 @@
-# FLAIR Test Suite
+# FLAIR Test Suite Workflow
 
 A testing pipeline to:
 
