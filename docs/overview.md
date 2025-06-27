@@ -31,38 +31,26 @@ custom and widely used analysis scripts to help us determine the accuracy of eac
 
 **test_regions**
 By splitting whole samples into regions - we can run quick tests to assess how different options interact (or how new developments of FLAIR perform relative to past versions).  Regions of interest, derived from the Human GENCODE v48 annotation, are used during development of the test suite. These regions were selected based on qualities such as :
-Region size
-Number of genes
-Total isoforms
-median isoforms per gene
-average gene length
-median of the mean exons per isoform 
-isoform entropy 
-RNA biotypes : such as percentage of RNAs annotated as protein coding vs lncRNA
+- Region size
+- Number of genes
+- Total isoforms
+- median isoforms per gene
+- average gene length
+- median of the mean exons per isoform 
+- isoform entropy 
+- RNA biotypes : such as percentage of RNAs annotated as protein coding vs lncRNA
 
 by selecting on these qualities, we hope to capture the wide range of transcriptome diversity existing within whole samples - while maintaining a balance of speed. 
 
 **test_data_set**
-The test data set is what is used for development of the FLAIR test suite. This includes :
+The test data set is what is used for development of the FLAIR test suite. 
 
 `real data`
-Input data : 
-Organism : Human
-Sequencing : PacBio
-Sample : WTC11
-Annotation : GENCODE v48
-Splice Junctions : 
-
-Data for QC : 
-Experimental 5 prime data : CAGE
-Experimental 3 prime data : QuantSeq
+Attributes: organism, sequencing platform
+Data : reads, gene annotation, splice junctions, experimental 5 prime and 3 prime
 
 `simulated data`
-Input data : 
-Sequencing : Simulated long reads 
-
-Data for QC : 
-5 prime and 3 prime data : simulated read ground truth 
+Attributes: 
 
 **data_set(s)**
 Further data sets can be added to the FLAIR the suite. This includes new organisms, sequencing techniques, simulated reads, and annotations.
