@@ -9,6 +9,9 @@ Compare isoform annotation and quantification across new and exisiting FLAIR rel
 
 ---
 
+## Synopsis
+
+
 ## Glossary of Terms
 
 **version**
@@ -24,7 +27,7 @@ Refers to the entirety of a complete FLAIR run spanning alignment steps to quant
 custom and widely used analysis scripts to help us determine the accuracy of each FLAIR run and compre them to each other
 
 **test_regions**
-Regions of interest, derived from the Human GENCODE v48 annotation, and used during development of the test suite. These regions were selected based on qualities such as :
+By splitting whole samples into regions - we can run quick tests to assess how different options interact (or how new developments of FLAIR perform relative to past versions).  Regions of interest, derived from the Human GENCODE v48 annotation, are used during development of the test suite. These regions were selected based on qualities such as :
 Region size
 Number of genes
 Total isoforms
@@ -33,6 +36,8 @@ average gene length
 median of the mean exons per isoform 
 isoform entropy 
 RNA biotypes : such as percentage of RNAs annotated as protein coding vs lncRNA
+
+by selecting on these qualities, we hope to capture the wide range of transcriptome diversity existing within whole samples - while maintaining a balance of speed. 
 
 **test_data_set**
 The test data set is what is used for development of the FLAIR test suite. This includes :
