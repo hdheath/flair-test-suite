@@ -10,7 +10,10 @@ Compare isoform annotation and quantification across new and exisiting FLAIR rel
 ---
 
 ## Synopsis
-
+```python
+(TBD)
+```
+---
 
 ## Glossary of Terms
 
@@ -62,9 +65,36 @@ Data for QC :
 5 prime and 3 prime data : simulated read ground truth 
 
 **data_set(s)**
-Further data sets can be added to perform QC of FLAIR. This includes new organisms, sequencing techniques, simulated reads, and annotations.
+Further data sets can be added to the FLAIR the suite. This includes new organisms, sequencing techniques, simulated reads, and annotations.
 
 **regions**
 New regions of interest that can be added to the exisiting regions used in development or exclusively used in the FLAIR test suite
+
+**manifest.py**
+file used to set up FLAIR runs including; version, region, flags, QC 
+
+**flair_align_automation.py**
+script used to create and run each unique FLAIR align step
+
+**flair_correct_automation.py**
+script used to create and run each unique FLAIR correct step
+
+**slice.py**
+script used to slice input files by the given regions - to be fed into FLAIR collapse
+
+**flair_collapse_automation.py**
+script used to create and run each unique FLAIR collpase step
+
+**sqanti_automation.py**
+script used to run sqanti on flair collapse outputs and create the region summary plot 
+
+**ted_automation.py**
+script used to analyze transcript end performance on flair collapse outputs and create the region summary plot 
+
+**flair_quantify_automation.py**
+script used to create and run each unique FLAIR quantify step
+
+**flair_quantify_qc.py**
+(TBD)
 
 ---
