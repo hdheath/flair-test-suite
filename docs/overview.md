@@ -1,4 +1,4 @@
-## FLAIR Test Suite Overview
+# FLAIR Test Suite Overview
 
 The FLAIR Test Suite is organized to cover the pipeline’s functionality across multiple dimensions. Test cases are grouped in ways that make it easy to target specific aspects of the pipeline or data contexts. The primary groupings are:
 
