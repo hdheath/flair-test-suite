@@ -1,88 +1,173 @@
-# FLAIR Test Suite
+## FLAIR Test Suite Overview
 
-A framework for reproducible, version-aware benchmarking and development of FLAIR.
-
----
-
-## Description 
-Compare isoform annotation and quantification across new and exisiting FLAIR releases, sequencing protocols, and genomic regions.
+The FLAIR Test Suite is organized to cover the pipeline’s functionality across multiple dimensions. Test cases are grouped in ways that make it easy to target specific aspects of the pipeline or data contexts. The primary groupings are:
 
 ---
 
-## Synopsis
-```python
-(TBD)
+### By Workflow Mode
+
+The FLAIR Test Suite is organized around **end-to-end test cases** and **stage-specific test cases**.
+
+#### 1. End-To-End Test Cases  
+Run the complete FLAIR workflow from raw reads through QC (and optional differential analysis) with self-contained stage options at each step. After each stage of an end-to-end test case, a set of **QC Checkpoints** (sub-tests) validate the intermediate outputs.
+
+#### 2. Stage Test Cases  
+Run a specific stage of the FLAIR pipeline (e.g., align, correct, collapse, …), from a well-defined input state. Stage tests are categorized by the module they exercise. Grouping by stage allows testers to run a focused subset of tests. For instance, during development of an improved collapse algorithm, one can run just the Collapse Stage Tests to verify its behavior without running the full suite.
+
+---
+
+### By Dataset Type
+
+Test cases are also grouped by the nature of the dataset:
+
+- **Simulated Data Tests**  
+  Use artificial datasets where the “true” isoforms are known in advance (e.g., simulated reads from a known transcript set, or spike-in controls). These help validate correctness without biological ambiguity.
+
+- **Real Experimental Data Tests**  
+  Use real sequencing datasets (e.g., human nanopore cDNA, direct RNA, PacBio Iso-Seq). While ground truth is not fully known, these tests come with expected biological behaviors (e.g., known mutation effects or tissue-specific splicing patterns).
+
+  - **Platform/Library Variants**  
+    Group cases by sequencing platform or library prep (e.g., Oxford Nanopore vs PacBio; cDNA vs direct RNA). Also test different read lengths or depths (e.g., high-depth vs low-depth) to ensure FLAIR performs robustly.
+
+
+This grouping ensures that any changes affecting a specific data type (e.g., poly(A) tail handling) can be checked in isolation, and helps identify data-specific issues.
+
+#### *Dataset* attributes
+- *name*  
+- *description*  
+- *data_source* – real or simulated  
+- *organism*  
+- *assembly*  
+- *platform* – ONT or PB  
+- *read_fastq* – one or more FASTQ files  
+- *gene_set_name*  
+- *gene_set_annot_gtf* – GTF annotation file  
+- *gene_set_meta_tsv* – TSV with metadata (extracted from GTF)  
+- *splice_junctions_files* – splice junction files (STAR, BED)  
+- *tss_evidence* – TSS evidence files (CAGE, etc)  
+- *tes_evidence* – TES evidence files (QuantSeq, etc)  
+- *ground_truth* – for simulated data  
+
+---
+
+### By Region/Scope
+
+A region is a genomic coordinate where we expect FLAIR to analyze transcripts. Test cases choose one of these region scopes:
+
+- **Targeted Region Tests**  
+  Run on a limited locus or small gene set (e.g., reads mapping to chr21 or a single gene). These quick smoke tests are useful for debugging specific issues.
+
+- **Whole-Transcriptome Tests**  
+  Run on genome-wide data (e.g., whole human transcriptome) to ensure the pipeline scales to full dataset sizes and complexities.
+
+- **Regional Edge-Case Tests**  
+  Cover challenging regions (e.g., high gene density, pseudogenes, repetitive sequences). Helps ensure corner cases are regularly checked.
+
+Grouping by region helps select quick tests for fast feedback or full-scale validation to reveal scale-dependent issues (e.g., memory leaks).
+
+#### *Region* attributes
+- *chr*  
+- *start*  
+- *end*  
+
+#### *Region* considerations for selection
+- Region size  
+- Number of genes  
+- Total isoforms  
+- Median isoforms per gene  
+- Average gene length  
+- Median of mean exons per isoform  
+- Isoform entropy  
+- RNA biotypes (e.g., % protein coding vs lncRNA)  
+
+---
+
+### By FLAIR Version
+
+In each test case you specify the **FLAIR version** to run (for example, `v1.5` or `v2.0-dev`). 
+
+
+---
+
+## Summary of Test Suite Structure
+
+In practice, each test case is uniquely identified and tagged along four dimensions:
+
+| Dimension   | Example Tags                             |
+|-------------|------------------------------------------|
+| **Workflow**| `E2E`, `AlignOnly`, `CollapseOnly`       |
+| **Dataset** | `Simulated`, `PacBio HiFi`               |
+| **Region**  | `chr21:42000-62000,chr13:14300-15000`, `WholeTranscriptome`, `chr13` |
+| **Version** | `v1.5`, `v2.0-dev`, `v2.0-newFeatures`   |
+ 
+
+## Example Directory Layout
+```plaintext
+├── outputs/
+│   └── flair_<version>/                         # FLAIR version (e.g., flair_v2.1.1)
+│       └── <sample>/                            # Sample identifier (e.g., human_GENCODEv48_WTC11)
+│           └── run_<align_id>[_<corr_id>]/      # Alignment settings, Correct settings
+│               ├── align/                       # FLAIR align output 
+│               │   ├── <sample>.bam
+│               │   └── <sample>.bed
+│               │
+│               ├── correct/                     # FLAIR correct output
+│               │   ├── <sample>.corrected.bam
+│               │   └── <sample>.corrected.bed
+│               │
+│               ├── regions/                     # sliced files used for FLAIR collapse runs
+│               │   └── chr20_3218000_3250000/
+│               │       ├── raw/                 
+│               │       │   ├── chr20…-3250000.bam
+│               │       │   ├── chr20…-3250000.bed
+│               │       │   ├── chr20…-3250000.gtf
+│               │       │   ├── chr20…-3250000.fasta
+│               │       │   ├── chr20…-3250000.exp5.bed
+│               │       │   └── …
+│               │       │
+│               │       ├── collapse/            # FLAIR collapse per-region, using different options 
+│               │       │   └── collapse_<flags>/
+│               │       │       ├── *.isoforms.gtf
+│               │       │       └── *.isoforms.bed
+│               │       │
+│               │       ├── collapse_qc/         # FLAIR collapse QC for this region across all runs 
+│               │       │   ├── sqanti_summary.tsv
+│               │       │   ├── sqanti.png
+│               │       │   ├── ted_summary.tsv
+│               │       │   ├── ted.png
+│               │       │   └── region_metrics.png
+│               │       │
+│               │       ├── quantify/            # FLAIR quantify per-region, using different options 
+│               │       │   └── quantify_<flags>/
+│               │       │       ├── isoform_tpm.tsv
+│               │       │       └── gene_counts.tsv
+│               │       │
+│               │       └── quantify_qc/         # FLAIR quantify QC for this region across all runs 
+│               │           └── flair_quantify_metrics.png
+│               │
+│               └── logs/
+│                   ├── <align_id>.time.log
+│                   ├── <correct_id>.time.log
+│                   ├── <collapse_id>.time.log
+│                   ├── <quantify_id>.time.log
+│                   ├── ted.time.log
+│                   ├── sqanti_error.log
+│                   └── quantify_qc.log
+└── tests/
+    └── data/
+        └── test_data_set_real/
+            ├── sample.gtf
+            └── sample_reads.fastq
+            └── reference.fastq
+            └── [optional] reference TSS/TTS bed file(s)
+            └── [optional] experiment TSS/TTS bed file(s)
+            └── [optional] reference splice junction bed file
+        └── test_data_set_simulated/
+            ├── sample.gtf
+            └── sample_reads.fastq
+            └── reference.fastq
+            └── [optional] reference TSS/TTS bed file(s)
+            └── [optional] experiment TSS/TTS bed file(s)
+            └── [optional] reference splice junction bed file
 ```
----
 
-## Glossary of Terms
-
-**version**
-the different versions of FLAIR that are being tested
-
-**flags**
-The different options used together at each step of the FLAIR pipeline
-
-**flair_run**
-Refers to the entirety of a complete FLAIR run spanning alignment steps to quantification
-
-**QC**
-custom and widely used analysis scripts to help us determine the accuracy of each FLAIR run and compre them to each other
-
-**test_regions**
-By splitting whole samples into regions - we can run quick tests to assess how different options interact (or how new developments of FLAIR perform relative to past versions).  Regions of interest, derived from the Human GENCODE v48 annotation, are used during development of the test suite. These regions were selected based on qualities such as :
-- Region size
-- Number of genes
-- Total isoforms
-- median isoforms per gene
-- average gene length
-- median of the mean exons per isoform 
-- isoform entropy 
-- RNA biotypes : such as percentage of RNAs annotated as protein coding vs lncRNA
-
-by selecting on these qualities, we hope to capture the wide range of transcriptome diversity existing within whole samples - while maintaining a balance of speed. 
-
-**test_data_set**
-The test data set is what is used for development of the FLAIR test suite. 
-
-`real data`
-Attributes: organism, sequencing platform
-Data : reads, gene annotation, splice junctions, experimental 5 prime and 3 prime
-
-`simulated data`
-Attributes: 
-
-**data_set(s)**
-Further data sets can be added to the FLAIR the suite. This includes new organisms, sequencing techniques, simulated reads, and annotations.
-
-**regions**
-New regions of interest that can be added to the exisiting regions used in development or exclusively used in the FLAIR test suite
-
-**manifest.py**
-file used to set up FLAIR runs including; version, region, flags, QC 
-
-**flair_align_automation.py**
-script used to create and run each unique FLAIR align step
-
-**flair_correct_automation.py**
-script used to create and run each unique FLAIR correct step
-
-**slice.py**
-script used to slice input files by the given regions - to be fed into FLAIR collapse
-
-**flair_collapse_automation.py**
-script used to create and run each unique FLAIR collpase step
-
-**sqanti_automation.py**
-script used to run sqanti on flair collapse outputs and create the region summary plot 
-
-**ted_automation.py**
-script used to analyze transcript end performance on flair collapse outputs and create the region summary plot 
-
-**flair_quantify_automation.py**
-script used to create and run each unique FLAIR quantify step
-
-**flair_quantify_qc.py**
-(TBD)
-
----
