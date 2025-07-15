@@ -1,4 +1,8 @@
 # ------------------------------------------------------
+# config_template.toml
+# ------------------------------------------------------
+
+# ------------------------------------------------------
 # Summary of Run
 # ------------------------------------------------------
 summary = """
@@ -9,27 +13,30 @@ It captures:
   • Stage-specific flag options (align, correct, collapse, quantify)
   • Passing metrics thresholds for each stage
   • Embedded documentation on how to configure regions and flags
-
-
 """
+
+# ------------------------------------------------------
+# Base directory for all input files
+# ------------------------------------------------------
+input_root    = "tests/data"
+
+# ------------------------------------------------------
+# Whole Sample Mode (*Set false if running by region)
+# ------------------------------------------------------
+whole_sample  = false
+
+# ------------------------------------------------------
+# Run ID
+# ------------------------------------------------------
+run_id        = 1
 
 # ------------------------------------------------------
 # Version configuration
 # ------------------------------------------------------
 [run]
-version    = "2.0.0"
-conda_env  = "flair-v2"
+version       = "2.0.0"
+conda_env     = "flair2"
 
-# ------------------------------------------------------
-# Base directory for all input files
-# ------------------------------------------------------
-input_root = "tests/data" * should be global data dir
-data_dir   = "human_GENCODEv48_WTC11_PacBio_CAGE_QuantSeq"
-
-# ------------------------------------------------------
-# Whole Sample Mode (*Set false if running by region)
-# ------------------------------------------------------
-whole_sample = False 
 # ------------------------------------------------------
 # Region Selection Summary
 # ------------------------------------------------------
@@ -45,8 +52,6 @@ description = """
 # ------------------------------------------------------
 # Region configuration (*empty if running whole sample)
 # ------------------------------------------------------
-
-# Regions to process (one or more blocks permitted)
 [[run.regions]]
 chr    = "chr20"
 ranges = ["3218000:3250000"]
@@ -54,15 +59,6 @@ ranges = ["3218000:3250000"]
 # ------------------------------------------------------
 # Stage Summaries
 # ------------------------------------------------------
-[documentation.region_selection]
-description = """
-• Specify one or more chromosomal regions under [[run.regions]].
-• Each entry has:
-    chr    = chromosome name (e.g. "chr1")
-    ranges = array of "start:end" strings.
-• Multiple blocks allow multi‑region runs.
-"""
-
 [documentation.steps.align]
 description = """
 • The ‘align’ stage maps reads to the reference genome.
@@ -111,14 +107,13 @@ experimental_tss_bed = "CAGE_TSS_human.bed"
 experimental_tts_bed = "WTC11_all_polyApeaks_fixed.bed"
 
   [data_dir.metadata]
-  sample         = "WTC11"
-  organism       = "Human"
-  platform       = "PacBio"
-  replicates     = 3
-  dataset_origin = "real"            # "real" vs. "simulated"
-  experimental__5_prime_end_library_prep   = "CAGE"
-  experimental__5_prime_end_library_prep   = "QuantSeq"
-
+  sample                                 = "WTC11"
+  organism                               = "Human"
+  platform                               = "PacBio"
+  replicates                             = 3
+  dataset_origin                         = "real"            # "real" vs. "simulated"
+  experimental__5_prime_end_library_prep = "CAGE"
+  experimental__3_prime_end_library_prep = "QuantSeq"
 
 # ------------------------------------------------------
 # Flags for each stage (one option per stage)
@@ -127,20 +122,20 @@ experimental_tts_bed = "WTC11_all_polyApeaks_fixed.bed"
 threads = 12
 
 [run.steps.correct.flags]
-threads   = 12
-junc      = "${input_root}/${run.data_dir}/WTC11_all.SJ.out.tab"
+threads = 12
+junc    = "${input_root}/${run.data_dir}/WTC11_all.SJ.out.tab"
 
 [run.steps.collapse.flags]
-support       = 1
-check_splice  = true
-filter        = "stringent"
-threads       = 8
+support      = 1
+check_splice = true
+filter       = "stringent"
+threads      = 8
 
 [run.steps.quantify.flags]
-support       = 1
-check_splice  = true
-filter        = "stringent"
-threads       = 8
+support      = 1
+check_splice = true
+filter       = "stringent"
+threads      = 8
 
 # ------------------------------------------------------
 # Passing metrics thresholds for QC per stage
@@ -158,5 +153,5 @@ exists               = true
 isoform_count_range  = "50-150"
 
 [run.metrics.quantify]
-exists           = true
-precision_range  = "0.80-0.90"
+exists          = true
+precision_range = "0.80-0.90"

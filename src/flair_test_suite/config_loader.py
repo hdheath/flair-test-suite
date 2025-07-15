@@ -1,36 +1,27 @@
-## src/config_loader.py
-import os
+#src/flair_test_suite/config.py
+import toml
+from pathlib import Path
+from types import SimpleNamespace
 
-try:
-    import tomllib
-except ImportError:
-    import toml as tomllib
+def _to_ns(obj):
+    """
+    Recursively convert dicts → SimpleNamespace and lists of dicts → lists of namespaces.
+    """
+    if isinstance(obj, dict):
+        return SimpleNamespace(**{k: _to_ns(v) for k, v in obj.items()})
+    elif isinstance(obj, list):
+        return [_to_ns(v) for v in obj]
+    else:
+        return obj
 
-
-def load_config(path: str) -> dict:
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"Config file not found: {path}")
-    with open(path, "rb") as f:
-        return tomllib.load(f)
-
-
-def validate_config(cfg: dict):
-    required = ["run_id", "input_root", "data_dir", "run"]
-    missing = [k for k in required if k not in cfg]
-    if missing:
-        raise KeyError(f"Missing config keys: {missing}")
-
-
-class Config:
-    def __init__(self, raw: dict):
-        validate_config(raw)
-        self.raw        = raw
-        self.run_id     = raw["run_id"]
-        self.summary    = raw.get("summary", "")
-        self.input_root = raw["input_root"]
-        self.data       = raw["data_dir"]
-        self.run        = raw["run"]
-
-    @property
-    def data_dir(self) -> str:
-        return os.path.join(self.input_root, self.data["name"])
+def load_config(path):
+    """
+    Load a TOML file from `path` and return a namespaced config object.
+    Usage:
+        cfg = load_config("config/config_template.toml")
+        print(cfg.run.version)
+        print(cfg.run.steps.align.flags.threads)
+    """
+    text = Path(path).read_text(encoding="utf-8")
+    raw  = toml.loads(text)
+    return _to_ns(raw)
