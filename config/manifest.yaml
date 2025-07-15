@@ -1,0 +1,51 @@
+# example_pipeline.yaml
+
+# ─── Required arguments ───────────────────────────────────────────────────────
+query: /private/groups/brookslab/hdheath/projects/rotation/alignments/human_flair2/flair_all_corrected.bed
+genome: /private/groups/brookslab/reference_sequence/GRCh38.primary_assembly.genome.fa
+reads_fasta: 
+- /private/groups/brookslab/hdheath/projects/rotation/fastas/human/WTC11.PacBio.3reps.fasta
+bam: /private/groups/brookslab/hdheath/projects/rotation/alignments/human_flair2/human_flair_OUTPUT.bam
+
+
+# ─── Optional inputs ──────────────────────────────────────────────────────────
+junctions: /private/groups/brookslab/cafelton/lrgasp-wtc11/WTC11_all.SJ.out.tab
+gtf:       /private/groups/brookslab/hdheath/projects/flair-test-suite/flair-test-suite/tests/data/gencode.v48.annotation.gtf
+reference_5_prime_regions_bed_file: /private/groups/brookslab/hdheath/projects/rotation/orthogonal/human/ref/human_ref_TSS.bed
+reference_3_prime_regions_bed_file: /private/groups/brookslab/hdheath/projects/rotation/orthogonal/human/ref/human_ref_TTS.bed
+5_prime_regions_bed_file : /private/groups/brookslab/hdheath/projects/rotation/orthogonal/human/5_prime/refTSS_human_fixed.bed
+3_prime_regions_bed_file : /private/groups/brookslab/hdheath/projects/rotation/orthogonal/human/3_prime/polyA/WTC11_all_polyApeaks_fixed.bed
+threads:   12
+
+# ─── Collapse options ────────────────────────────────────────────────────────
+collapse_options:
+[--support, ]
+  --support:               []
+  --no_redundant:          []
+  --filter:                []
+  --stringent:             [true,false]
+  --check_splice:          [true]
+  --trust_ends:            []
+  --quality:               []
+  --longshot_bam:          []
+  --longshot_vcf:          []
+  --end_window:            []
+  --promoters:             []
+  --3prime_regions:        []
+  --isoformtss:            []
+  --no_gtf_end_adjustment: []
+  --max_ends:              []
+  --generate_map:          [true]
+  --annotation_reliant:    [generate]
+  --annotated_bed:         []
+  --temp_dir:              []
+  --keep_intermediate:     []
+  --mm2_args:              []
+  --quiet:                 []
+  --range:                 []
+
+# ─── Regions (optional) ───────────────────────────────────────────────────────
+regions:
+  chr20:
+    - 3218000:3250000
+

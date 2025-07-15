@@ -126,77 +126,72 @@ A testing pipeline to:
 
 ## Example Directory Layout
 ```plaintext
-flair-test-suite/
-├── config/
-│   └── manifest.py
-├── src/
-│   └── flair_automate/
-│       ├── __init__.py
-│       ├── flair_align_automation.py
-│       ├── flair_correct_automation.py
-│       ├── slicer.py
-│       ├── flair_collapse_automation.py
-│       ├── parse_region_metrics_from_gtf.py
-│       ├── sqanti_runner.py
-│       └── sqanti_plot.py
-├── scripts/
-│   └── flair_test_suite.py
 ├── outputs/
-│   └── <sample>/                                # organism, fasta, version
-│       └── run_<align_id>[_<corr_id>]/          # Alignment settings, Correct settings
-│           ├── align/                                 # FLAIR align output 
-│           │   ├── <sample>.bam
-│           │   └── <sample>.bed
-│           │
-│           ├── correct/                               # FLAIR correct output
-│           │   ├── <sample>.corrected.bam
-│           │   └── <sample>.corrected.bed
-│           │
-│           ├── regions/                               # sliced files used for FLAIR collapse and FLAIR quantify runs
-│           │   └── chr20_3218000_3250000/
-│           │       ├── raw/                               
-│           │       │   ├── chr20…-3250000.bam
-│           │       │   ├── chr20…-3250000.bed
-│           │       │   ├── chr20…-3250000.gtf
-│           │       │   ├── chr20…-3250000.fasta
-│           │       │   ├── chr20…-3250000.exp5.bed
-│           │       │   └── …  
-│           │       │
-│           │       ├── collapse/                           # FLAIR collapse per-region, using different options 
-│           │       │   └── collapse_<flags>/
-│           │       │       ├── *.isoforms.gtf
-│           │       │       └── *.isoforms.bed
-│           │       │
-│           │       ├── collapse_qc/                        # FLAIR collapse QC for this region across all runs 
-│           │       │   ├── sqanti_summary.tsv
-│           │       │   ├── sqanti.png
-│           │       │   ├── ted_summary.tsv
-│           │       │   ├── ted.png
-│           │       │   └── region_metrics.png
-│           │       │
-│           │       └── quantify_<flags>/                   # FLAIR quantify per-region, using different options 
-│           │           ├── isoform_tpm.tsv
-│           │           └── gene_counts.tsv
-│           │       └── quantify_qc/                        # FLAIR quantify QC for this region across all runs 
-│           │           ├── flair_quantify_metrics.png
-│           │           
-│           │
-│           └── logs/
-│               ├── align.time.log
-│               ├── correct.time.log
-│               ├── collapse.time.log
-│               ├── quantify.time.log
-│               ├── ted.time.log
-│               ├── sqanti_error.log
-│               └── quantify_qc.log
+│   └── flair_<version>/                         # FLAIR version (e.g., flair_v2.1.1)
+│       └── <sample>/                            # Sample identifier (e.g., human_GENCODEv48_WTC11)
+│           └── run_<align_id>[_<corr_id>]/      # Alignment settings, Correct settings
+│               ├── align/                       # FLAIR align output 
+│               │   ├── <sample>.bam
+│               │   └── <sample>.bed
+│               │
+│               ├── correct/                     # FLAIR correct output
+│               │   ├── <sample>.corrected.bam
+│               │   └── <sample>.corrected.bed
+│               │
+│               ├── regions/                     # sliced files used for FLAIR collapse runs
+│               │   └── chr20_3218000_3250000/
+│               │       ├── raw/                 
+│               │       │   ├── chr20…-3250000.bam
+│               │       │   ├── chr20…-3250000.bed
+│               │       │   ├── chr20…-3250000.gtf
+│               │       │   ├── chr20…-3250000.fasta
+│               │       │   ├── chr20…-3250000.exp5.bed
+│               │       │   └── …
+│               │       │
+│               │       ├── collapse/            # FLAIR collapse per-region, using different options 
+│               │       │   └── collapse_<flags>/
+│               │       │       ├── *.isoforms.gtf
+│               │       │       └── *.isoforms.bed
+│               │       │
+│               │       ├── collapse_qc/         # FLAIR collapse QC for this region across all runs 
+│               │       │   ├── sqanti_summary.tsv
+│               │       │   ├── sqanti.png
+│               │       │   ├── ted_summary.tsv
+│               │       │   ├── ted.png
+│               │       │   └── region_metrics.png
+│               │       │
+│               │       ├── quantify/            # FLAIR quantify per-region, using different options 
+│               │       │   └── quantify_<flags>/
+│               │       │       ├── isoform_tpm.tsv
+│               │       │       └── gene_counts.tsv
+│               │       │
+│               │       └── quantify_qc/         # FLAIR quantify QC for this region across all runs 
+│               │           └── flair_quantify_metrics.png
+│               │
+│               └── logs/
+│                   ├── <align_id>.time.log
+│                   ├── <correct_id>.time.log
+│                   ├── <collapse_id>.time.log
+│                   ├── <quantify_id>.time.log
+│                   ├── ted.time.log
+│                   ├── sqanti_error.log
+│                   └── quantify_qc.log
 └── tests/
     └── data/
-        ├── sample.gtf
-        └── sample_reads.fastq
-        └── reference.fastq
-        └── [optional] reference TSS/TTS bed file(s)
-        └── [optional] experiment TSS/TTS bed file(s)
-        └── [optional] reference splice junction bed file
+        └── test_data_set_real/
+            ├── sample.gtf
+            └── sample_reads.fastq
+            └── reference.fastq
+            └── [optional] reference TSS/TTS bed file(s)
+            └── [optional] experiment TSS/TTS bed file(s)
+            └── [optional] reference splice junction bed file
+        └── test_data_set_simulated/
+            ├── sample.gtf
+            └── sample_reads.fastq
+            └── reference.fastq
+            └── [optional] reference TSS/TTS bed file(s)
+            └── [optional] experiment TSS/TTS bed file(s)
+            └── [optional] reference splice junction bed file
 ```
 
 

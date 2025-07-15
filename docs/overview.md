@@ -4,21 +4,15 @@ The FLAIR Test Suite is organized to cover the pipeline’s functionality across
 
 ---
 
-### By Workflow Mode
+### Design
 
-The FLAIR Test Suite is organized around **end-to-end test cases** and **stage-specific test cases**.
-
-#### 1. End-To-End Test Cases  
-Run the complete FLAIR workflow from raw reads through QC (and optional differential analysis) with self-contained stage options at each step. After each stage of an end-to-end test case, a set of **QC Checkpoints** (sub-tests) validate the intermediate outputs.
-
-#### 2. Stage Test Cases  
-Run a specific stage of the FLAIR pipeline (e.g., align, correct, collapse, …), from a well-defined input state. Stage tests are categorized by the module they exercise. Grouping by stage allows testers to run a focused subset of tests. For instance, during development of an improved collapse algorithm, one can run just the Collapse Stage Tests to verify its behavior without running the full suite.
+The FLAIR Test Suite is organized around **end-to-end test cases**, where each **test-case** is a complete FLAIR workflow from raw reads through FLAIR quantify with self-contained stage options at each step. After each stage of a test-case, a set of **QC Checkpoints** (sub-tests) validate the intermediate outputs to decide if the run should continue. 
 
 ---
 
-### By Dataset Type
+### Dataset Type
 
-Test cases are also grouped by the nature of the dataset:
+Test cases are defined by the nature of the dataset:
 
 - **Simulated Data Tests**  
   Use artificial datasets where the “true” isoforms are known in advance (e.g., simulated reads from a known transcript set, or spike-in controls). These help validate correctness without biological ambiguity.
@@ -50,23 +44,20 @@ This grouping ensures that any changes affecting a specific data type (e.g., pol
 
 ---
 
-### By Region/Scope
+### Region/Scope
 
-A region is a genomic coordinate where we expect FLAIR to analyze transcripts. Test cases choose one of these region scopes:
+Test cases are also defined by region. A region is a genomic coordinate where we expect FLAIR to analyze transcripts. Test cases choose one of these region scopes:
 
 - **Targeted Region Tests**  
-  Run on a limited locus or small gene set (e.g., reads mapping to chr21 or a single gene). These quick smoke tests are useful for debugging specific issues.
+  Run on a limited locus or small gene set (e.g., reads mapping to chr21 or a single gene). Cover challenging regions (e.g., high gene density, pseudogenes, repetitive sequences). Helps ensure corner cases are regularly checked.
 
 - **Whole-Transcriptome Tests**  
   Run on genome-wide data (e.g., whole human transcriptome) to ensure the pipeline scales to full dataset sizes and complexities.
 
-- **Regional Edge-Case Tests**  
-  Cover challenging regions (e.g., high gene density, pseudogenes, repetitive sequences). Helps ensure corner cases are regularly checked.
-
 Grouping by region helps select quick tests for fast feedback or full-scale validation to reveal scale-dependent issues (e.g., memory leaks).
 
 #### *Region* attributes
-- *chr*  
+- *chr*
 - *start*  
 - *end*  
 
@@ -82,7 +73,7 @@ Grouping by region helps select quick tests for fast feedback or full-scale vali
 
 ---
 
-### By FLAIR Version
+### FLAIR Version
 
 In each test case you specify the **FLAIR version** to run (for example, `v1.5` or `v2.0-dev`). 
 
@@ -95,7 +86,6 @@ In practice, each test case is uniquely identified and tagged along four dimensi
 
 | Dimension   | Example Tags                             |
 |-------------|------------------------------------------|
-| **Workflow**| `E2E`, `AlignOnly`, `CollapseOnly`       |
 | **Dataset** | `Simulated`, `PacBio HiFi`               |
 | **Region**  | `chr21:42000-62000,chr13:14300-15000`, `WholeTranscriptome`, `chr13` |
 | **Version** | `v1.5`, `v2.0-dev`, `v2.0-newFeatures`   |
@@ -104,45 +94,49 @@ In practice, each test case is uniquely identified and tagged along four dimensi
 ## Example Directory Layout
 ```plaintext
 ├── outputs/
-│   └── flair_<version>/                         # FLAIR version (e.g., flair_v2.1.1)
-│       └── <sample>/                            # Sample identifier (e.g., human_GENCODEv48_WTC11)
-│           └── run_<align_id>[_<corr_id>]/      # Alignment settings, Correct settings
-│               ├── align/                       # FLAIR align output 
-│               │   ├── <sample>.bam
-│               │   └── <sample>.bed
+│       └── <sample>/                                 # Sample identifier (e.g., human_GENCODEv48_WTC11)
+│               ├── align/                            # FLAIR align output 
+│               │   └── align_<flags>/
+│               │       ├── <flags>.bam
+│               │       └── <sample><flags>.bed
 │               │
-│               ├── correct/                     # FLAIR correct output
-│               │   ├── <sample>.corrected.bam
-│               │   └── <sample>.corrected.bed
+│               ├── correct/                          # FLAIR correct output
+│               │   └── correct_<flags>/
+│               │       ├── <flags>.corrected.bam
+│               │       └── <flags>.corrected.bed
 │               │
-│               ├── regions/                     # sliced files used for FLAIR collapse runs
+│               ├── regions/                          # sliced files used for FLAIR collapse runs
 │               │   └── chr20_3218000_3250000/
 │               │       ├── raw/                 
 │               │       │   ├── chr20…-3250000.bam
 │               │       │   ├── chr20…-3250000.bed
 │               │       │   ├── chr20…-3250000.gtf
 │               │       │   ├── chr20…-3250000.fasta
-│               │       │   ├── chr20…-3250000.exp5.bed
+│               │       │   ├── chr20…-3250000.bed
 │               │       │   └── …
 │               │       │
-│               │       ├── collapse/            # FLAIR collapse per-region, using different options 
+│               │       ├── collapse/                 # FLAIR collapse per-region, using different options 
 │               │       │   └── collapse_<flags>/
 │               │       │       ├── *.isoforms.gtf
 │               │       │       └── *.isoforms.bed
+│               │       ├── transcriptome/            # FLAIR transcriptome per-region, using different options 
+│               │       │   └── transcriptome_<flags>/
+│               │       │       ├── *.isoforms.gtf
+│               │       │       └── *.isoforms.bed
 │               │       │
-│               │       ├── collapse_qc/         # FLAIR collapse QC for this region across all runs 
+│               │       ├── collapse_qc/              # FLAIR collapse QC for this region across all runs 
 │               │       │   ├── sqanti_summary.tsv
 │               │       │   ├── sqanti.png
 │               │       │   ├── ted_summary.tsv
 │               │       │   ├── ted.png
 │               │       │   └── region_metrics.png
 │               │       │
-│               │       ├── quantify/            # FLAIR quantify per-region, using different options 
+│               │       ├── quantify/                 # FLAIR quantify per-region, using different options 
 │               │       │   └── quantify_<flags>/
 │               │       │       ├── isoform_tpm.tsv
 │               │       │       └── gene_counts.tsv
 │               │       │
-│               │       └── quantify_qc/         # FLAIR quantify QC for this region across all runs 
+│               │       └── quantify_qc/              # FLAIR quantify QC for this region across all runs 
 │               │           └── flair_quantify_metrics.png
 │               │
 │               └── logs/
