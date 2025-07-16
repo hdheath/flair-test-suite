@@ -52,51 +52,56 @@ def _sanitize_flags(flags_str: str) -> str:
     parts = [p for p in flags_str.split(';') if not p.strip().startswith("threads=")]
     return ";".join(p.strip() for p in parts if p.strip())
 
+def _normalize_metadata(meta: dict) -> dict:
+    """
+    Return a new dict with:
+      - "Config Run ID" removed
+      - Flags stripped of any threads=... and the remainder sorted & joined
+    """
+    norm = {}
+    for key, val in meta.items():
+        if key == "Config Run ID":
+            continue
+        if key == "Flags":
+            # split on ';', strip whitespace, drop threads=, sort the rest
+            parts = [p.strip() for p in val.split(";") if p.strip() and not p.strip().startswith("threads=")]
+            parts.sort()
+            norm["Flags"] = ";".join(parts)
+        else:
+            norm[key] = val
+    return norm
+
 def find_matching_run(sample_name: str,
                       stage: str,
                       sample: str,
                       current_metadata: dict) -> str | None:
     """
-    Scan all run_id subdirs under outputs/<sample_name>/<stage>/,
-    parse each marker’s metadata, and if one matches current_metadata
-    (ignoring run-id and any threads=... in Flags), return that prior run_id.
-    Otherwise return None.
+    Scan outputs/<sample_name>/<stage>/<run_id> for any marker whose
+    normalized metadata (Sample, Read file, Version, Conda Env, Flags)
+    exactly equals the normalized current_metadata.  Return that run_id,
+    or None if there is no match.
     """
     base = Path("outputs") / sample_name / stage
     if not base.exists():
         return None
 
-    # Prepare the target metadata, minus run-id, and with sanitized Flags
-    target = {}
-    for k, v in current_metadata.items():
-        if k == "Config Run ID":
-            continue
-        if k == "Flags":
-            target["Flags"] = _sanitize_flags(v)
-        else:
-            target[k] = v
+    target = _normalize_metadata(current_metadata)
 
     for candidate in base.iterdir():
         if not candidate.is_dir():
             continue
         run_id = candidate.name
-        old = parse_marker(sample_name, stage, sample, run_id)
-        if not old:
+
+        marker = base / run_id / f"{run_id}.{stage}.completed.txt"
+        if not marker.exists():
+            # skip silently if no marker
             continue
 
-        # Sanitize the old metadata the same way
-        old_sanitized = {}
-        for k, v in old.items():
-            if k == "Config Run ID":
-                continue
-            if k == "Flags":
-                old_sanitized["Flags"] = _sanitize_flags(v)
-            else:
-                old_sanitized[k] = v
+        old = parse_marker(sample_name, stage, sample, run_id)
+        old_norm = _normalize_metadata(old)
 
-        # Compare sanitized old → target
-        if old_sanitized == target:
-            logging.info("Found matching run %s (ignoring threads)", run_id)
+        if old_norm == target:
+            logging.info("Found matching run %s for %s/%s", run_id, sample_name, stage)
             return run_id
 
     return None

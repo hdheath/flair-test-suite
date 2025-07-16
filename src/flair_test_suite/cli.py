@@ -41,10 +41,6 @@ def main():
         "configs", metavar="CONFIG_TOML", nargs='+',
         help="Paths to one or more TOML config files"
     )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Print commands without executing alignment"
-    )
     args = parser.parse_args()
 
     for cfg_path in args.configs:
@@ -61,7 +57,7 @@ def main():
         # Alignment stage
         if hasattr(cfg, 'run') and hasattr(cfg.run.steps, 'align'):
             try:
-                run_align(cfg, dry_run=args.dry_run)
+                run_align(cfg)
             except Exception:
                 logging.exception(f"Error during alignment for run {cfg.run_id}")
 
