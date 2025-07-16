@@ -96,9 +96,8 @@ In practice, each test case is uniquely identified and tagged along four dimensi
 ├── outputs/
 │       └── <sample>/                                 # Sample identifier (e.g., human_GENCODEv48_WTC11)
 │               ├── align/                            # FLAIR align output 
-│               │   └── align_<flags>/
-│               │       ├── <flags>.bam
-│               │       └── <sample><flags>.bed
+│               │      ├── <flags>.bam
+│               │      └── <sample><flags>.bed
 │               │
 │               ├── correct/                          # FLAIR correct output
 │               │   └── correct_<flags>/

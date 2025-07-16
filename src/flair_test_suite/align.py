@@ -2,7 +2,7 @@
 """
 src/flair_test_suite/align.py
 
-Run FLAIR `align` for each input read file using flags from config,
+Run FLAIR `align` using flags from config,
 skip runs already completed, and write a completion marker with metadata.
 Activates the specified Conda environment in a bash shell for each align.
 """
@@ -10,7 +10,10 @@ import logging
 import subprocess
 from pathlib import Path
 
-from flair_test_suite.check_completion_markers import is_run_completed, marker_path
+from flair_test_suite.check_completion_markers import (
+    marker_path,
+    find_matching_run,
+)
 
 
 def run_align(cfg, dry_run=False):
@@ -44,13 +47,31 @@ def run_align(cfg, dry_run=False):
 
     for read_file in read_files:
         sample = read_file.stem
-        run_dir = base_out / sample / run_id
-        marker = marker_path(cfg.sample_name, 'align', sample, run_id)
-
-        # Skip if already completed
-        if not dry_run and is_run_completed(cfg.sample_name, 'align', sample, run_id):
-            logging.info("[SKIP] align %s for sample %s (marker exists)", run_id, sample)
-            continue
+        # build the per-run directory
+        run_dir = base_out / run_id
+        # assemble the metadata we write into the marker
+        flags_str = "; ".join(
+            f"{k}={v}"
+            for k, v in sorted(flags.items())
+            if v not in (False, None, "")
+        )
+        current_metadata = {
+            "Config Run ID": run_id,
+            "Sample": sample,
+            "Read file": str(read_file),
+            "Version": cfg.run.version,          # <— track the FLAIR/config version
+            "Conda Env": conda_env,              # <— track the conda env used
+            "Flags": flags_str
+        }
+        # look for any prior run with identical metadata
+        if not dry_run:
+            match = find_matching_run(cfg.sample_name, 'align', sample, current_metadata)
+            if match is not None:
+                logging.info(
+                    "[SKIP] align (same settings already ran as run_id=%s) for sample %s",
+                    match, sample
+                )
+                continue
 
         # Ensure run directory exists
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -82,16 +103,16 @@ def run_align(cfg, dry_run=False):
             logging.error("FLAIR align failed for run_id=%s sample=%s: %s", run_id, sample, e)
             continue
 
-        # Write completion marker
+        # Write completion marker into this run_id folder
+        marker = marker_path(cfg.sample_name, 'align', sample, run_id)
         marker.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            content = [
-                f"Config Run ID: {run_id}",
-                f"Sample: {sample}",
-                f"Read file: {read_file}",
-                "Flags: " + "; ".join(f"{k}={v}" for k, v in flags.items())
-            ]
-            marker.write_text("\n".join(content))
-            logging.info("[DONE] align complete; marker at %s", marker)
-        except Exception as e:
-            logging.error("Failed writing marker %s: %s", marker, e)
+        content = [
+            f"Config Run ID: {run_id}",
+            f"Sample: {sample}",
+            f"Read file: {read_file}",
+            f"Version: {cfg.run.version}",
+            f"Conda Env: {conda_env}",
+            f"Flags: {flags_str}"
+        ]
+        marker.write_text("\n".join(content))
+        logging.info("[DONE] align complete; marker at %s", marker)

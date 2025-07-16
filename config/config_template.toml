@@ -102,7 +102,7 @@ description = """
 # ------------------------------------------------------
 [data_dir]
 name                 = "human_GENCODEv48_WTC11_PacBio_CAGE_QuantSeq"
-reads_fasta          = "WTC11.PacBio.3reps.fasta"
+reads_fasta          = "WTC11.100reads.fasta"
 genome_fasta         = "GRCh38.primary_assembly.genome.fa"
 annotation_gtf       = "gencode.v48.annotation.gtf"
 junctions            = "WTC11_all.SJ.out.tab"
@@ -124,7 +124,7 @@ experimental_tts_bed = "WTC11_all_polyApeaks_fixed.bed"
 # Flags for each stage (one option per stage)
 # ------------------------------------------------------
 [run.steps.align.flags]
-threads = 12
+threads = 4
 
 [run.steps.correct.flags]
 threads = 12
