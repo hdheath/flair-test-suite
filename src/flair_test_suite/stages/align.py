@@ -1,117 +1,117 @@
-#!/usr/bin/env python3
-"""
-src/flair_test_suite/stages/align.py
-
-Run the FLAIR "align" stage using shared build/skip/write helpers.
-This module exposes a standardized `run(flags, cfg, prev_run_id)` entrypoint
-so it can be dynamically invoked by the CLI dispatcher and chain run_ids.
-"""
-import logging
+from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from flair_test_suite.build_completion_file import (
-    build_metadata,
-    should_skip,
-    write_marker,
-)
+from .base import StageBase
+from ..paths import PathBuilder
 
 
-def run(flags, cfg, prev_run_id=None):
-    """
-    Perform the alignment stage using FLAIR based on `cfg` and `flags`.
+class AlignStage(StageBase):
+    name = "align"
 
-    Args:
-        flags:        SimpleNamespace of CLI flags from `run.stages.flags`.
-        cfg:          Namespace from load_config(), with fields:
-                      sample_name, input_root, data_dir, run_id,
-                      run.version, run.conda_env, etc.
-        prev_run_id:  If provided, the run_id to inspect/skip before using cfg.run_id.
+    # ------------------------------------------------------------------ #
+    # Build external command
+    # ------------------------------------------------------------------ #
+    def build_cmd(self) -> list[str]:
+        cfg = self.cfg
 
-    Returns:
-        str: the run_id whose .completed marker was used or created.
-    """
-    # Determine which run_id to use
-    run_id = prev_run_id or str(cfg.run_id)
+        # -------- resolve core inputs ----------------------------------
+        root       = getattr(cfg, "input_root", None) or cfg.run.input_root
+        data_dir   = getattr(cfg, "data_dir",   None) or cfg.run.data_dir
+        reads_file = getattr(cfg, "reads_file", None) or cfg.run.reads_file
+        genome_fa  = getattr(cfg, "genome_fa",  None) or cfg.run.genome_fa
 
-    # Prepare directories and inputs
-    base_out = Path("outputs") / cfg.sample_name / "align"
-    input_root = Path(cfg.input_root)
-    data = cfg.data_dir
-    genome = (input_root / data.genome_fasta).resolve()
+        reads  = (Path(root) / data_dir / reads_file).resolve()
+        genome = (Path(root) / data_dir / genome_fa).resolve()
 
-    # Determine read files (single or list)
-    reads_raw = data.reads_fasta
-    if isinstance(reads_raw, str):
-        read_files = [input_root / reads_raw]
-    else:
-        read_files = [input_root / rf for rf in reads_raw]
-    read_files = [rf.resolve() for rf in read_files]
+        # -------- signature input hashes -------------------------------
+        self._input_hashes = [
+            PathBuilder.sha256(reads),
+            PathBuilder.sha256(genome),
+        ]
 
-    # Convert flags namespace to dict and extract optional aligner override
-    flag_dict = vars(flags)
-    # Auto-resolve boolean flags to actual file paths
-    if flag_dict.get("junction_bed") is True:
-        flag_dict["junction_bed"] = str((input_root / data.junctions).resolve())
-    aligner = flag_dict.pop('aligner', None)
-    cmd_base = aligner.split() if aligner else ["flair", "align"]
-    conda_env = cfg.run.conda_env
+        env        = cfg.run.conda_env
+        out_prefix = f"{self.sample}_flair"
 
-    for read_file in read_files:
-        sample = cfg.sample_name
+        # -------- flexible flag parsing --------------------------------
+        flag_parts: list[str] = []
+        raw_flags = cfg.run.stages[0].flags  # list | str | SimpleNamespace
 
-        # Build metadata and check skip logic
-        metadata = build_metadata(
-            run_id=run_id,
-            sample=sample,
-            read_file=str(read_file),
-            version=cfg.run.version,
-            conda_env=conda_env,
-            flags=flag_dict,
-        )
-        skip_run = should_skip(cfg.sample_name, 'align', sample, metadata)
-        if skip_run:
-            logging.info(
-                "[SKIP] align (using existing run_id=%s) for sample %s",
-                skip_run, sample
-            )
-            return str(skip_run)
+        def _add_switch(k: str):
+            flag_parts.append(k if k.startswith("--") else f"--{k}")
 
-        # Create run directory
-        run_dir = base_out / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
+        if isinstance(raw_flags, list):
+            flag_parts.extend(raw_flags)
 
-        # Build the FLAIR align command
-        flair_cmd = cmd_base + ["-g", str(genome), "-r", str(read_file)]
-        # Forward all flags, including junction_bed
-        for k, v in sorted(flag_dict.items()):
-            opt = f"--{k}"
-            if isinstance(v, bool):
-                if v:
-                    flair_cmd.append(opt)
-            else:
-                flair_cmd.extend([opt, str(v)])
-        flair_cmd.extend(["-o", run_id])
+        elif isinstance(raw_flags, str):
+            flag_parts.extend(raw_flags.split())
 
-        joined = " ".join(flair_cmd)
-        cmd = ["bash", "-lc", f"conda activate {conda_env} && {joined}"]
+        else:  # table / SimpleNamespace
+            for key, val in vars(raw_flags).items():
+                # switches: true / "" / None
+                if val is True or val in ("", None):
+                    _add_switch(key)
+                # numeric value
+                elif isinstance(val, (int, float)):
+                    _add_switch(key)
+                    flag_parts.append(str(val))
+                # string -> maybe a file
+                else:
+                    p = Path(val)
+                    if not p.is_absolute():
+                        p = (Path(root) / data_dir / p).resolve()
+                    _add_switch(key)
+                    flag_parts.append(str(p))
+                    if p.exists():
+                        self._input_hashes.append(PathBuilder.sha256(p))
 
-        logging.info("[RUN] cd %s && %s", run_dir, ' '.join(cmd))
-        try:
-            subprocess.run(cmd, cwd=run_dir, check=True)
-        except FileNotFoundError as e:
-            logging.error("Executable not found: %s", e)
-            raise RuntimeError(f"Conda or FLAIR not found for env '{conda_env}'") from e
-        except subprocess.CalledProcessError as e:
-            logging.error(
-                "FLAIR align failed for run_id=%s sample=%s: %s",
-                run_id, sample, e
-            )
-            continue
+        # -------- store flat flag string for signature -----------------
+        self._flags_str = " ".join(flag_parts)
 
-        # Write completion marker for new run
-        write_marker(cfg.sample_name, 'align', metadata)
-        return run_id
+        # -------- capture FLAIR version --------------------------------
+        if not hasattr(self, "_tool_version"):
+            try:
+                raw = subprocess.check_output(
+                    ["conda", "run", "-n", env, "flair", "--version"],
+                    text=True,
+                ).strip()
+                self._tool_version = raw.splitlines()[-1] if raw else "flair-unknown"
+            except subprocess.CalledProcessError:
+                self._tool_version = "flair-unknown"
 
-    # No reads processed? return whatever run_id we have
-    return run_id
+        # -------- final command ----------------------------------------
+        return [
+            "conda", "run", "-n", env,
+            "flair", "align",
+            "-g", str(genome),
+            "-r", str(reads),
+            "-o", out_prefix,
+            *flag_parts,
+        ]
+
+    # ------------------------------------------------------------------ #
+    # Signature helpers
+    # ------------------------------------------------------------------ #
+    @property
+    def tool_version(self):
+        return getattr(self, "_tool_version", "flair-unknown")
+
+    @property
+    def flags_str(self):
+        return self._flags_str
+
+    @property
+    def input_hashes(self):
+        return self._input_hashes
+
+    # ------------------------------------------------------------------ #
+    # Expected outputs
+    # ------------------------------------------------------------------ #
+    def expected_outputs(self):
+        p = f"{self.sample}_flair"
+        return {"bam": Path(f"{p}.bam"), "bed": Path(f"{p}.bed")}
+
+    # QC handled globally
+    def collect_qc(self, pb):
+        return {}
+
