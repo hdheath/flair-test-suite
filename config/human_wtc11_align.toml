@@ -1,0 +1,34 @@
+# ------------------------------------------------------
+# Minimal example: single‑stage “align” test run
+# ------------------------------------------------------
+
+run_id = 1
+
+# ----- GLOBAL RUN SETTINGS -----
+[run]
+version    = "3.0.0"                    # target FLAIR version
+conda_env  = "flair-newest"             # name of your conda env
+work_dir   = "./outputs"                # where markers + results go
+threads    = 8                          # resource hint (optional)
+
+# ----- DATA INPUTS -----
+input_root = "./tests"                  # base dir containing genome + reads
+data_dir   = "data"                     # subfolder with this sample’s files
+reads_file = "WTC11.10reads.fasta"      # tiny fixture read file
+genome_fa  = "GRCh38.primary_assembly.genome.fa"  # reference genome slice
+
+# ----- STAGE DEFINITIONS -----
+[[run.stages]]
+name = "align"
+
+[run.stages.flags]
+nvrna        = true
+quality = 0
+junction_bed = "WTC11_all.SJ.out.tab"    # within input_root/data_dir
+
+# ----- QC THRESHOLDS FOR ALIGN -----
+[qc.align]
+max_runtime_hours = 24
+min_mapped_pct    = 80
+min_retained_pct  = 70
+
