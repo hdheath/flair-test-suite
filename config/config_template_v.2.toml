@@ -1,0 +1,98 @@
+# ------------------------------------------------------
+# config_template.toml
+# ------------------------------------------------------
+
+# ------------------------------------------------------
+# Sample Identifier
+# ------------------------------------------------------
+sample_name = "WTC_11_PacBio"
+
+# ------------------------------------------------------
+# Summary of Run
+# ------------------------------------------------------
+summary = """
+This TOML configuration file defines a real-dataset FLAIR test-suite run.
+It captures:
+  • Dataset metadata (organism, origin, library prep, etc.)
+  • Region selection (chromosome ranges to process)
+  • Stage-specific flag options (now driven by `run.stages`)
+  • Passing metrics thresholds for each stage
+  • Embedded documentation on how to configure regions and flags
+"""
+
+# ------------------------------------------------------
+# Base directory for all input files
+# ------------------------------------------------------
+input_root   = "tests/data"
+
+# ------------------------------------------------------
+# Whole Sample Mode (*Set false if running by region)
+# ------------------------------------------------------
+whole_sample = false
+
+# ------------------------------------------------------
+# Run ID
+# ------------------------------------------------------
+run_id       = "1_v.2"
+
+# ------------------------------------------------------
+# Version configuration
+# ------------------------------------------------------
+[run]
+version    = "2.0.0"
+conda_env  = "flair2"
+
+# ------------------------------------------------------
+# Region Selection Summary
+# ------------------------------------------------------
+[documentation.region_selection]
+description = """
+• Specify one or more chromosomal regions under [[run.regions]].
+• Each entry has:
+    chr    = chromosome name (e.g. "chr1")
+    ranges = array of "start:end" strings.
+• Multiple tables allow multi‑region runs.
+"""
+
+# ------------------------------------------------------
+# Region configuration (*empty if running whole sample)
+# ------------------------------------------------------
+[[run.regions]]
+chr    = "chr20"
+ranges = ["3218000:3250000"]
+
+# ------------------------------------------------------
+# Single dataset definition + metadata
+# ------------------------------------------------------
+[data_dir]
+name                 = "human_GENCODEv48_WTC11_PacBio_CAGE_QuantSeq"
+reads_fasta          = "WTC11.100reads.fasta"
+genome_fasta         = "GRCh38.primary_assembly.genome.fa"
+annotation_gtf       = "gencode.v48.annotation.gtf"
+junctions            = "WTC11_all.SJ.out.tab"
+ref_tss_bed          = "human_ref_TSS.bed"
+ref_tts_bed          = "human_ref_TTS.bed"
+experimental_tss_bed = "CAGE_TSS_human.bed"
+experimental_tts_bed = "WTC11_all_polyApeaks_fixed.bed"
+
+[data_dir.metadata]
+sample                                 = "WTC11"
+organism                               = "Human"
+platform                               = "PacBio"
+replicates                             = 3
+dataset_origin                         = "real"            # "real" vs. "simulated"
+experimental__5_prime_end_library_prep = "CAGE"
+experimental__3_prime_end_library_prep = "QuantSeq"
+
+# ------------------------------------------------------
+# Pipeline stages (only “align” for now)
+# ------------------------------------------------------
+[[run.stages]]
+name        = "align"
+description = "Map reads to the reference genome."
+
+# All CLI flags for this stage:
+flags = {threads = 4, junction_bed = true}
+
+# Metrics to check after completion; here we only require the .completed file
+metrics = {exists = true,time   = "24:00:00"}
