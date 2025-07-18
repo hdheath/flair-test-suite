@@ -31,3 +31,9 @@ class PathBuilder:
             for chunk in iter(lambda: f.read(bs), b""):
                 h.update(chunk)
         return h.hexdigest()
+
+    @staticmethod
+    def sha256_str(txt: str) -> str:
+        import hashlib
+        return hashlib.sha256(txt.encode()).hexdigest()
+

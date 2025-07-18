@@ -10,7 +10,9 @@ def collect(bed: Path, out_dir: Path,
             runtime_sec: float | None = None) -> dict:
 
     retained = int(subprocess.check_output(["wc", "-l", str(bed)], text=True).split()[0])
-    retained_pct = round(100 * retained / n_input_reads, 2)
+    retained_pct = (round(100 * retained / n_input_reads, 2)
+                if n_input_reads else None)
+
 
     metrics = {
         "n_input_reads":     n_input_reads,

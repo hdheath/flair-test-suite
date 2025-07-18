@@ -114,12 +114,12 @@ class AlignStage(StageBase):
         return getattr(self, "_tool_version", "flair-unknown")
 
     @property
-    def flags_str(self):
-        return self._flags_str
+    def input_hashes(self):
+        return getattr(self, "_input_hashes", [])
 
     @property
-    def input_hashes(self):
-        return self._input_hashes
+    def flags_str(self):
+        return getattr(self, "_flags_str", "")
 
     # ------------------------------------------------------------------ #
     # Expected outputs

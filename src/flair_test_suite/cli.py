@@ -1,34 +1,30 @@
+# src/flair_test_suite/cli.py
 import click, sys
 from pathlib import Path
 from .config_loader import load_config
 from .stages import STAGE_REGISTRY
-
+from .util.dag import topological_sort
 
 @click.command()
 @click.argument("config", type=click.Path(exists=True, path_type=Path))
-@click.option("--sample", help="Sample name (overrides config)")
-def main(config: Path, sample: str | None):
+def main(config):
     cfg = load_config(config)
-
-    # precedence: CLI flag > top‑level key > [run].sample
-    sample = (
-        sample
-        or getattr(cfg, "sample", None)
-        or getattr(cfg.run, "sample", None)
-    )
+    sample = cfg.sample or cfg.run.sample          # no CLI override needed
     if not sample:
-        raise click.UsageError("No sample specified in CLI or config")
+        raise click.UsageError("sample must be set in the TOML file")
 
     work_dir = Path(cfg.run.work_dir)
+    stage_order = topological_sort(cfg.run.stages)
 
-    for stage_cfg in cfg.run.stages:
-        Stage = STAGE_REGISTRY[stage_cfg.name]
-        pb = Stage(cfg, sample, work_dir).run()
-        if pb:
-            print(f"✓ Done {stage_cfg.name} – outputs: {pb.stage_dir}")
-
+    upstreams: dict[str, "PathBuilder"] = {}
+    for st_cfg in stage_order:
+        StageCls = STAGE_REGISTRY[st_cfg.name]
+        pb = StageCls(cfg, sample, work_dir, upstreams).run()
+        upstreams[st_cfg.name] = pb
+        print(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 

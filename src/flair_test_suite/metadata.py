@@ -1,14 +1,16 @@
 from __future__ import annotations
-import json, hashlib
+import json, hashlib, base64
 from datetime import datetime, timezone
 import platform
 from pathlib import Path
 from .paths import PathBuilder
 
 
-def compute_signature(tool_ver: str, flags: str, input_hashes: list[str]) -> str:
-    key = "\n".join([tool_ver, flags, *input_hashes])
-    return hashlib.sha256(key.encode()).hexdigest()[:12]
+def compute_signature(tool_version: str, flags: str, hashes: list[str]) -> str:
+    uniq = sorted(set(hashes))               # stable order, de‑dup
+    payload = f"{tool_version}|{flags}|{'|'.join(uniq)}"
+    return hashlib.sha1(payload.encode()).hexdigest()[:12]
+
 
 
 def write_marker(pb: PathBuilder, meta: dict):
@@ -39,3 +41,13 @@ def is_complete(pb) -> bool:
 
     # We'll let StageBase supply expected files; see patch there
     return True
+
+def qc_sidecar_path(stage_dir: Path, stage_name: str) -> Path:
+    return stage_dir / f"{stage_name}_qc.tsv"
+
+def load_marker(stage_dir: Path) -> dict | None:
+    m = stage_dir / ".completed.json"
+    if m.exists():
+        import json
+        return json.loads(m.read_text())
+    return None
