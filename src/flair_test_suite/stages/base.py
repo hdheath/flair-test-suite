@@ -13,6 +13,7 @@ class StageBase(ABC):
     """Common execution scaffold for all pipeline stages (align, correct, …)."""
 
     name: str  # must be overridden in each concrete subclass
+    primary_output_key: str = "bam"   # <─ NEW default for QC look‑up
 
     # ------------------------------------------------------------------ #
     def __init__(self, cfg, sample: str, work_dir: Path):
@@ -42,30 +43,55 @@ class StageBase(ABC):
         sig = self.signature
         pb = PathBuilder(self.work_dir, self.sample, self.name, sig)
 
-        # Skip if this exact signature is already complete
-        if is_complete(pb):
-            print(f"[SKIP] {self.name} already complete (sig={sig})")
-            return pb
+        # ---------------------------------------------------------- skip logic
+        if (pb.stage_dir / ".completed.json").exists():
+            exp_files = self.expected_outputs().values()
+            missing = [fp for fp in exp_files if not (pb.stage_dir / fp).exists()]
+
+            # QC side‑car required if a collector is registered
+            qc_sidecar = None
+            if self.name in QC_REGISTRY:
+                qc_sidecar = pb.stage_dir / f"{self.name}_qc.tsv"
+                if not qc_sidecar.exists():
+                    missing.append(qc_sidecar)
+
+            if not missing:
+                print(f"[SKIP] {self.name} already complete (sig={sig})")
+                return pb       # ← early return only if *everything* is present
+            else:
+                print(f"[WARN] Re‑running {self.name}: missing {len(missing)} files")
+
 
         pb.stage_dir.mkdir(parents=True, exist_ok=True)
 
         # ---------- execute ----------
         start = time.time()
-        exit_code = subprocess.call(cmd, cwd=pb.stage_dir)
+        with open(pb.stage_dir / "tool_stdout.log", "w") as out, \
+            open(pb.stage_dir / "tool_stderr.log", "w") as err:
+            exit_code = subprocess.call(
+                cmd,
+                cwd=pb.stage_dir,
+                stdout=out,
+                stderr=err,
+            )
+
         runtime   = round(time.time() - start, 2)
 
-        # ---------- QC collection ----------
+        # ---------- QC collection --------------------------------------------
         qc_metrics = {}
         qc_func = QC_REGISTRY.get(self.name)
         if qc_func:
-            primary = self.expected_outputs().get("bam")           # align's BAM
+            key = getattr(self, "primary_output_key", "bam")
+            primary = self.expected_outputs().get(key)
             if primary and not primary.is_absolute():
-                primary = pb.stage_dir / primary                   # make absolute
+                primary = pb.stage_dir / primary
+
             if primary.exists():
                 try:
                     qc_metrics = qc_func(
-                        bam=primary,
+                        primary,                         # ← positional, no keyword
                         out_dir=pb.stage_dir,
+                        n_input_reads=getattr(self, "_n_input_reads", None),
                         runtime_sec=runtime,
                     )
                 except Exception as e:
@@ -73,24 +99,23 @@ class StageBase(ABC):
             else:
                 print(f"[WARN] QC skipped: {primary} does not exist")
 
-
-
-
-
-        # ---------- write completion marker ----------
+        # ---------- write completion marker ----------------------------------
         meta = {
             "stage": self.name,
             "signature": sig,
             "cmd": " ".join(map(str, cmd)),
             "exit_code": exit_code,
-            "runtime_sec": runtime,
+            "runtime_sec": round(runtime, 2),
             "started": datetime.fromtimestamp(start, timezone.utc).isoformat(),
             "ended":   datetime.now(timezone.utc).isoformat(),
             "host": platform.node(),
             "qc": qc_metrics,
         }
+        if hasattr(self, "_n_input_reads"):
+            meta["n_input_reads"] = self._n_input_reads
         write_marker(pb, meta)
         return pb
+
 
     # ------------------------------------------------------------------ #
     # Signature helpers

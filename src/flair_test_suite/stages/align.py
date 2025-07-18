@@ -7,7 +7,19 @@ from ..paths import PathBuilder
 
 
 class AlignStage(StageBase):
+    """Run `flair align` and publish input‑read count for QC."""
     name = "align"
+
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _count_reads(fp: Path) -> int:
+        """Return number of sequences in FASTA/FASTQ file."""
+        if fp.suffix.lower() in {".fa", ".fasta"}:
+            return sum(1 for ln in fp.open() if ln.startswith(">"))
+        else:  # assume FASTQ
+            return sum(1 for _ in fp.open()) // 4
 
     # ------------------------------------------------------------------ #
     # Build external command
@@ -21,8 +33,8 @@ class AlignStage(StageBase):
         reads_file = getattr(cfg, "reads_file", None) or cfg.run.reads_file
         genome_fa  = getattr(cfg, "genome_fa",  None) or cfg.run.genome_fa
 
-        reads  = (Path(root) / data_dir / reads_file).resolve()
-        genome = (Path(root) / data_dir / genome_fa).resolve()
+        reads   = (Path(root) / data_dir / reads_file).resolve()
+        genome  = (Path(root) / data_dir / genome_fa).resolve()
 
         # -------- signature input hashes -------------------------------
         self._input_hashes = [
@@ -30,14 +42,17 @@ class AlignStage(StageBase):
             PathBuilder.sha256(genome),
         ]
 
+        # -------- count input reads once for QC ------------------------
+        self._n_input_reads = self._count_reads(reads)
+
         env        = cfg.run.conda_env
         out_prefix = f"{self.sample}_flair"
 
         # -------- flexible flag parsing --------------------------------
         flag_parts: list[str] = []
-        raw_flags = cfg.run.stages[0].flags  # list | str | SimpleNamespace
+        raw_flags = cfg.run.stages[0].flags        # list | str | SimpleNamespace
 
-        def _add_switch(k: str):
+        def _switch(k: str):
             flag_parts.append(k if k.startswith("--") else f"--{k}")
 
         if isinstance(raw_flags, list):
@@ -48,24 +63,26 @@ class AlignStage(StageBase):
 
         else:  # table / SimpleNamespace
             for key, val in vars(raw_flags).items():
-                # switches: true / "" / None
-                if val is True or val in ("", None):
-                    _add_switch(key)
-                # numeric value
+                # boolean switch
+                if val in ("", None, True):
+                    _switch(key)
+                elif val is False:
+                    continue  # explicit false means omit flag
+                # numeric scalar
                 elif isinstance(val, (int, float)):
-                    _add_switch(key)
+                    _switch(key)
                     flag_parts.append(str(val))
-                # string -> maybe a file
+                # string (maybe a relative file)
                 else:
                     p = Path(val)
                     if not p.is_absolute():
                         p = (Path(root) / data_dir / p).resolve()
-                    _add_switch(key)
+                    _switch(key)
                     flag_parts.append(str(p))
                     if p.exists():
                         self._input_hashes.append(PathBuilder.sha256(p))
 
-        # -------- store flat flag string for signature -----------------
+        # -------- store flag string for signature ----------------------
         self._flags_str = " ".join(flag_parts)
 
         # -------- capture FLAIR version --------------------------------
@@ -79,7 +96,7 @@ class AlignStage(StageBase):
             except subprocess.CalledProcessError:
                 self._tool_version = "flair-unknown"
 
-        # -------- final command ----------------------------------------
+        # -------- final command list -----------------------------------
         return [
             "conda", "run", "-n", env,
             "flair", "align",
@@ -108,8 +125,8 @@ class AlignStage(StageBase):
     # Expected outputs
     # ------------------------------------------------------------------ #
     def expected_outputs(self):
-        p = f"{self.sample}_flair"
-        return {"bam": Path(f"{p}.bam"), "bed": Path(f"{p}.bed")}
+        base = f"{self.sample}_flair"
+        return {"bam": Path(f"{base}.bam"), "bed": Path(f"{base}.bed")}
 
     # QC handled globally
     def collect_qc(self, pb):

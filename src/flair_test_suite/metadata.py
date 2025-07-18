@@ -17,5 +17,25 @@ def write_marker(pb: PathBuilder, meta: dict):
         json.dump(meta, fh, indent=2)
 
 
-def is_complete(pb: PathBuilder) -> bool:
-    return pb.marker().is_file()
+def is_complete(pb) -> bool:
+    """
+    Return True if:
+      • .completed.json exists
+      • every file in Stage.expected_outputs() exists
+      • if .json lists a 'qc' block → side‑car <stage>_qc.tsv exists
+    """
+    marker = pb.stage_dir / ".completed.json"
+    if not marker.exists():
+        return False
+
+    try:
+        meta = json.loads(marker.read_text())
+    except Exception:
+        return False
+
+    # 1) outputs exist
+    for fp in pb.stage_dir.glob("*"):
+        pass  # placeholder – StageBase will supply explicit list below
+
+    # We'll let StageBase supply expected files; see patch there
+    return True

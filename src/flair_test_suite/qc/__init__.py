@@ -12,4 +12,5 @@ def register(stage_name: str):
 
 
 # --- auto‑import built‑in collectors so they self‑register ------------
-from . import align_qc  # noqa: F401  (<─ ensures decorator runs)
+from . import align_qc, correct_qc   # noqa
+
