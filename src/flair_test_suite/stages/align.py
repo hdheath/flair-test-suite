@@ -1,56 +1,49 @@
+# src/flair_test_suite/stages/align.py
 from __future__ import annotations
 import subprocess
 from pathlib import Path
 
 from .base import StageBase
-from ..paths import PathBuilder
+from ..core import PathBuilder
+from ..core.input_hash import hash_many
 
 
 class AlignStage(StageBase):
     """Run `flair align` and publish input‑read count for QC."""
     name = "align"
 
-    # ------------------------------------------------------------------ #
-    # Helpers
-    # ------------------------------------------------------------------ #
     @staticmethod
     def _count_reads(fp: Path) -> int:
         """Return number of sequences in FASTA/FASTQ file."""
         if fp.suffix.lower() in {".fa", ".fasta"}:
             return sum(1 for ln in fp.open() if ln.startswith(">"))
-        else:  # assume FASTQ
+        else:
             return sum(1 for _ in fp.open()) // 4
 
-    # ------------------------------------------------------------------ #
-    # Build external command
-    # ------------------------------------------------------------------ #
     def build_cmd(self) -> list[str]:
         cfg = self.cfg
 
-        # -------- resolve core inputs ----------------------------------
+        # — resolve core inputs —
         root       = getattr(cfg, "input_root", None) or cfg.run.input_root
         data_dir   = getattr(cfg, "data_dir",   None) or cfg.run.data_dir
         reads_file = getattr(cfg, "reads_file", None) or cfg.run.reads_file
         genome_fa  = getattr(cfg, "genome_fa",  None) or cfg.run.genome_fa
 
-        reads   = (Path(root) / data_dir / reads_file).resolve()
-        genome  = (Path(root) / data_dir / genome_fa).resolve()
+        reads  = (Path(root) / data_dir / reads_file).resolve()
+        genome = (Path(root) / data_dir / genome_fa).resolve()
 
-        # -------- signature input hashes -------------------------------
-        self._input_hashes = [
-            PathBuilder.sha256(reads),
-            PathBuilder.sha256(genome),
-        ]
-
-        # -------- count input reads once for QC ------------------------
+        # — count input reads for QC —
         self._n_input_reads = self._count_reads(reads)
+
+        # — collect signature inputs —
+        self._hash_inputs = [reads, genome]
 
         env        = cfg.run.conda_env
         out_prefix = f"{self.sample}_flair"
 
-        # -------- flexible flag parsing --------------------------------
-        flag_parts: list[str] = []
+        # — parse flags —
         raw_flags = cfg.run.stages[0].flags        # list | str | SimpleNamespace
+        flag_parts: list[str] = []
 
         def _switch(k: str):
             flag_parts.append(k if k.startswith("--") else f"--{k}")
@@ -63,16 +56,13 @@ class AlignStage(StageBase):
 
         else:  # table / SimpleNamespace
             for key, val in vars(raw_flags).items():
-                # boolean switch
+                if val is False:
+                    continue
                 if val in ("", None, True):
                     _switch(key)
-                elif val is False:
-                    continue  # explicit false means omit flag
-                # numeric scalar
                 elif isinstance(val, (int, float)):
                     _switch(key)
                     flag_parts.append(str(val))
-                # string (maybe a relative file)
                 else:
                     p = Path(val)
                     if not p.is_absolute():
@@ -80,23 +70,27 @@ class AlignStage(StageBase):
                     _switch(key)
                     flag_parts.append(str(p))
                     if p.exists():
-                        self._input_hashes.append(PathBuilder.sha256(p))
+                        self._hash_inputs.append(p)
 
-        # -------- store flag string for signature ----------------------
-        self._flags_str = " ".join(flag_parts)
+        # — store flags for signature —
+        self._flags_components = flag_parts
 
-        # -------- capture FLAIR version --------------------------------
+        # — capture tool version once —
         if not hasattr(self, "_tool_version"):
             try:
                 raw = subprocess.check_output(
                     ["conda", "run", "-n", env, "flair", "--version"],
-                    text=True,
+                    text=True
                 ).strip()
                 self._tool_version = raw.splitlines()[-1] if raw else "flair-unknown"
             except subprocess.CalledProcessError:
                 self._tool_version = "flair-unknown"
 
-        # -------- final command list -----------------------------------
+        # — debug —
+        print("[DEBUG] align _hash_inputs:", self._hash_inputs)
+        print("[DEBUG] align flags       :", " ".join(flag_parts))
+
+        # — final command —
         return [
             "conda", "run", "-n", env,
             "flair", "align",
@@ -106,29 +100,27 @@ class AlignStage(StageBase):
             *flag_parts,
         ]
 
-    # ------------------------------------------------------------------ #
-    # Signature helpers
-    # ------------------------------------------------------------------ #
     @property
     def tool_version(self):
         return getattr(self, "_tool_version", "flair-unknown")
 
     @property
-    def input_hashes(self):
-        return getattr(self, "_input_hashes", [])
+    def flags_str(self) -> str:
+        return " ".join(getattr(self, "_flags_components", []))
 
     @property
-    def flags_str(self):
-        return getattr(self, "_flags_str", "")
+    def input_hashes(self) -> list[str]:
+        return hash_many(getattr(self, "_hash_inputs", []))
 
-    # ------------------------------------------------------------------ #
-    # Expected outputs
-    # ------------------------------------------------------------------ #
     def expected_outputs(self):
         base = f"{self.sample}_flair"
-        return {"bam": Path(f"{base}.bam"), "bed": Path(f"{base}.bed")}
+        return {
+            "bam": Path(f"{base}.bam"),
+            "bed": Path(f"{base}.bed"),
+        }
 
-    # QC handled globally
+    # QC is run by the base class via QC_REGISTRY
     def collect_qc(self, pb):
         return {}
+
 

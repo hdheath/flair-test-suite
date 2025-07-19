@@ -1,4 +1,6 @@
 # src/flair_test_suite/util/dag.py
+
+
 def topological_sort(stage_cfg_list):
     """Return stages sorted by their 'requires' fields."""
     graph = {s.name: set(getattr(s, "requires", [])) for s in stage_cfg_list}

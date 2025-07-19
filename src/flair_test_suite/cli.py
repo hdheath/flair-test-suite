@@ -3,7 +3,12 @@ import click, sys
 from pathlib import Path
 from .config_loader import load_config
 from .stages import STAGE_REGISTRY
-from .util.dag import topological_sort
+from .core import (              #  ← one dot, not two
+    PathBuilder,
+    topological_sort,
+)
+
+from typing import Dict
 
 @click.command()
 @click.argument("config", type=click.Path(exists=True, path_type=Path))
@@ -16,7 +21,7 @@ def main(config):
     work_dir = Path(cfg.run.work_dir)
     stage_order = topological_sort(cfg.run.stages)
 
-    upstreams: dict[str, "PathBuilder"] = {}
+    upstreams: Dict[str, PathBuilder] = {}
     for st_cfg in stage_order:
         StageCls = STAGE_REGISTRY[st_cfg.name]
         pb = StageCls(cfg, sample, work_dir, upstreams).run()

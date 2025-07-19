@@ -2,91 +2,79 @@
 from __future__ import annotations
 from pathlib import Path
 from .base import StageBase
-from ..paths import PathBuilder
-from .align import AlignStage
+from ..core import PathBuilder
 
 class CorrectStage(StageBase):
+    """
+    Run `flair correct` on the BED produced by the upstream align stage.
+    The stage is skipped if the signature folder already contains the
+    primary output **and** QC side‑car (handled by StageBase).
+    """
     name = "correct"
-    requires = ("align",)             # enforce presence
+    requires = ("align",)
     primary_output_key = "corrected"
 
+    # ------------------------------------------------------------------ #
     def build_cmd(self) -> list[str]:
         cfg = self.cfg
 
-
-        align_stage = AlignStage(cfg, self.sample, self.work_dir, self.upstreams)
-        align_stage.build_cmd()               # fills _flags_str and _input_hashes
-        align_sig  = align_stage.signature
-        align_pb   = PathBuilder(cfg.run.work_dir, self.sample, "align", align_sig)
+        # ---------- get align artifacts from upstreams -----------------
+        align_pb: PathBuilder = self.upstreams["align"]
         align_bed  = align_pb.stage_dir / f"{self.sample}_flair.bed"
+        align_sig  = align_pb.signature           # already stable
 
+        # ---------- resolve shared genome path -------------------------
+        root      = cfg.run.input_root
+        data_dir  = cfg.run.data_dir
+        genome    = (Path(root) / data_dir / cfg.run.genome_fa).resolve()
 
+        # ---------- start collecting input files for hashing -----------
+        self._hash_inputs = [align_bed, genome]
 
-        root      = getattr(cfg, "input_root", None) or cfg.run.input_root
-        data_dir  = getattr(cfg, "data_dir",   None) or cfg.run.data_dir
-        genome_fa = getattr(cfg, "genome_fa",  None) or cfg.run.genome_fa
-        genome    = (Path(root) / data_dir / genome_fa).resolve()
-
-
-        # signature inputs
-        self._input_hashes = [
-            PathBuilder.sha256(align_bed),
-            PathBuilder.sha256(genome),
-            PathBuilder.sha256_str(align_sig),
-        ]
-
-
-        # ------------------------------------------------------------ flexible flags
-        env   = cfg.run.conda_env
-        flags = cfg.run.stages[1].flags
+        # ---------- parse flag table -----------------------------------
+        flags_cfg = cfg.run.stages[1].flags    # second [[run.stages]]
         flag_parts: list[str] = []
-        def _switch(k: str): flag_parts.append(f"--{k}")
 
-        root = Path(root).resolve()
-        for k, v in vars(flags).items():
-            if v in ("", None, True):
-                _switch(k)
+        def _add_flag(k: str, v: str | int | None = None):
+            flag_parts.append(f"--{k}")
+            if v not in (None, ""):
+                flag_parts.append(str(v))
+
+        for k, v in vars(flags_cfg).items():
+            if v in (None, "", True):
+                _add_flag(k)
             elif v is False:
                 continue
             elif isinstance(v, (int, float)):
-                _switch(k); flag_parts.append(str(v))
+                _add_flag(k, v)
             else:
-                p = (root / data_dir / v).resolve()
-                _switch(k); flag_parts.append(str(p))
-                if p.exists():
-                    # hash immediately so it’s ready *before* signature is read
-                    self._input_hashes.append(PathBuilder.sha256(p))
+                fp = (Path(root) / data_dir / v).resolve()
+                _add_flag(k, fp)
+                self._hash_inputs.append(fp)
 
-        self._flags_str = " ".join(flag_parts)            # ➊ already used in signature
+        # include the *align* signature itself so different upstream
+        # combinations yield a different correct signature folder
+        self._hash_inputs.append(align_sig)
 
-        # ---------- signature inputs  (move *below* flag parsing!) -------------
-        self._input_hashes.extend([                      # ➋ ensure non‑empty
-            PathBuilder.sha256(align_bed),
-            PathBuilder.sha256(genome),
-            PathBuilder.sha256_str(align_sig),
-        ])
+        self._flags_components = flag_parts
 
-        # ---------- final command ----------------------------------------------
+        # ---------- command --------------------------------------------
+        env = cfg.run.conda_env
         return [
             "conda", "run", "-n", env,
             "flair", "correct",
             "-q", str(align_bed),
-            "-o", f"{self.sample}",
+            "-o", self.sample,               # flair appends “_all_*”
             *flag_parts,
         ]
 
-
-    # ------------------------------------------------------------------ #
-    # Files flair‑correct actually writes
     # ------------------------------------------------------------------ #
     def expected_outputs(self):
-        base = f"{self.sample}"
+        base = f"{self.sample}_all"
         return {
-            "corrected":   Path(f"{base}_all_corrected.bed"),
-            "inconsistent": Path(f"{base}_all_inconsistent.bed"),
+            "corrected":    Path(f"{base}_corrected.bed"),
+            "inconsistent": Path(f"{base}_inconsistent.bed"),
         }
 
     def collect_qc(self, pb):
-        return {}          # handled by qc.correct
-
-
+        return {}   # handled by qc.correct plug‑in

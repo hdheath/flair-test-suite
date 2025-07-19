@@ -2,7 +2,7 @@
 from __future__ import annotations
 import subprocess
 from pathlib import Path
-from . import register
+from flair_test_suite.core.qc import register, write_metrics
 
 
 @register("align")

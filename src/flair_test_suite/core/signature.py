@@ -2,8 +2,7 @@ from __future__ import annotations
 import json, hashlib, base64
 from datetime import datetime, timezone
 import platform
-from pathlib import Path
-from .paths import PathBuilder
+from .paths import PathBuilder    # instead of ..paths
 
 
 def compute_signature(tool_version: str, flags: str, hashes: list[str]) -> str:
@@ -19,29 +18,6 @@ def write_marker(pb: PathBuilder, meta: dict):
         json.dump(meta, fh, indent=2)
 
 
-def is_complete(pb) -> bool:
-    """
-    Return True if:
-      • .completed.json exists
-      • every file in Stage.expected_outputs() exists
-      • if .json lists a 'qc' block → side‑car <stage>_qc.tsv exists
-    """
-    marker = pb.stage_dir / ".completed.json"
-    if not marker.exists():
-        return False
-
-    try:
-        meta = json.loads(marker.read_text())
-    except Exception:
-        return False
-
-    # 1) outputs exist
-    for fp in pb.stage_dir.glob("*"):
-        pass  # placeholder – StageBase will supply explicit list below
-
-    # We'll let StageBase supply expected files; see patch there
-    return True
-
 def qc_sidecar_path(stage_dir: Path, stage_name: str) -> Path:
     return stage_dir / f"{stage_name}_qc.tsv"
 
@@ -51,3 +27,19 @@ def load_marker(stage_dir: Path) -> dict | None:
         import json
         return json.loads(m.read_text())
     return None
+
+def is_complete(stage_dir: Path, outputs: list[Path], needs_qc: bool) -> bool:
+    """Return True if marker + outputs (+ optional QC) are present."""
+    marker = stage_dir / ".completed.json"
+    if not marker.exists():
+        return False
+    if not all(p.exists() for p in outputs):
+        return False
+    if needs_qc:
+        qc_tsv = stage_dir / f"{stage_dir.name}_qc.tsv"
+        if not qc_tsv.exists():
+            return False
+        if not json.loads(marker.read_text()).get("qc"):
+            return False
+    return True
+
