@@ -1,77 +1,60 @@
-"""
-Central logic for deciding whether a stage should be
- • skipped                      (all good)
- • re‑QC only                   (outputs exist, QC missing)
- • fully re‑run                 (outputs missing / stale)
-
-The object is intentionally tiny so it can be reused by every stage.
-"""
-
+# ────────────────────────────────────────────────────────────
+# src/flair_test_suite/core/reinstate.py
+# ------------------------------------------------------------------
 from __future__ import annotations
-from enum import Enum, auto
-from pathlib import Path
+
 import json
+from pathlib import Path
+from typing import Literal
 
-from . import qc_sidecar_path
+from ..qc import qc_sidecar_path, load_marker
 
-
-class Action(Enum):
-    SKIP     = auto()
-    QC_ONLY  = auto()
-    RUN      = auto()
+# The three actions our state machine can return
+Action = Literal["skip", "qc", "run"]
 
 
 class Reinstate:
-    """Stateless helper – all decisions funnel through one place."""
-
-    @staticmethod
-    def _marker_ok(marker_f: Path) -> bool:
-        if not marker_f.exists():
-            return False
-        try:
-            _ = json.loads(marker_f.read_text())
-            return True
-        except Exception:
-            return False
+    """
+    Stateless helper used by StageBase.run() to decide whether
+    we can skip a stage, regenerate only its QC, or need to run it.
+    """
 
     # ------------------------------------------------------------------
     @staticmethod
-    def decide(
-        stage_dir: Path,
-        primary_out: Path,
-        needs_qc: bool = False,
-    ) -> Action:
+    def decide(stage_dir: Path,
+               primary: Path,
+               needs_qc: bool,
+               stage_name: str) -> Action:
         """
-        Decide what to do for this stage instance.
-
         Parameters
         ----------
-        stage_dir    : Path to the stage signature folder
-        primary_out  : Primary output file (Path)
-        needs_qc     : If True, the stage registers a QC collector
+        stage_dir   : directory for this stage+signature
+        primary     : primary output file (Path)
+        needs_qc    : does this stage have a QC collector?
+        stage_name  : plain name ("align", "correct", …)
 
         Returns
         -------
-        Action.SKIP     – everything present (incl. QC if required)
-        Action.QC_ONLY  – outputs present but QC missing
-        Action.RUN      – tool must be executed
+        "skip"  – marker, primary output *and* QC (if needed) exist
+        "qc"    – primary output exists, QC missing ⇒ regenerate QC only
+        "run"   – otherwise run the external tool
         """
         marker_f = stage_dir / ".completed.json"
+        marker_ok = marker_f.exists()
+        primary_ok = primary.exists()
 
-        if not primary_out.exists() or not Reinstate._marker_ok(marker_f):
-            return Action.RUN
+        # For QC: need side‑car TSV *and* a "qc" block in marker
+        if needs_qc:
+            qc_tsv = qc_sidecar_path(stage_dir, stage_name)
+            qc_ok = qc_tsv.exists() and load_marker(stage_dir).get("qc")
+        else:
+            qc_ok = True  # QC not required
 
-        if not needs_qc:
-            return Action.SKIP
+        if marker_ok and primary_ok and qc_ok:
+            return "skip"
 
-        qc_f = qc_sidecar_path(stage_dir, stage_dir.name)
-        try:
-            qc_block = json.loads(marker_f.read_text()).get("qc")
-        except Exception:
-            qc_block = None
+        if primary_ok and not qc_ok and needs_qc:
+            return "qc"
 
-        if qc_f.exists() and qc_block:
-            return Action.SKIP
-
-        return Action.QC_ONLY
+        return "run"
 
