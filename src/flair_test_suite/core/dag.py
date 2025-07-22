@@ -25,7 +25,7 @@ def topological_sort(stage_cfg_list: List) -> List:
 
     ordered: List[str] = []  # list of stage names in sorted order
 
-    # 2) Kahn's algorithm: repeatedly pick stages with no remaining requirements
+    # 2) pick stages with no remaining requirements
     while graph:
         # Find all stages whose requirement set is empty => ready to run
         ready = [name for name, deps in graph.items() if not deps]

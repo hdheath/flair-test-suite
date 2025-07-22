@@ -60,5 +60,3 @@ def collect(
     # Return metrics dict so StageBase can embed it in .metadata
     return metrics
 
-# End of correct_qc.py
-
