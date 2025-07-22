@@ -8,6 +8,7 @@ import hashlib  # for SHA-256 hashing
 import json     # to serialize scalars consistently
 from pathlib import Path  # for filesystem paths
 from typing import Iterable, List, Union  # type annotations
+import os
 
 # Explicitly export the public functions of this module
 __all__ = ["hash_path", "hash_scalar", "hash_many"]
@@ -28,19 +29,22 @@ def _sha256_bytes(data: bytes) -> str:
 
 def hash_path(p: Path) -> str:
     """
-    Hash the entire contents of a file using SHA-256.
+    Cheap‑but‑robust file hash.
 
-    Parameters:
-      - p: Path to the file (must exist)
+    Hashes a concatenation of:
+        absolute_path | size_in_bytes | mtime_in_nanoseconds
 
-    Returns:
-      - hex digest string of the file's contents
-
-    Raises:
-      - any IO error if the file is missing or unreadable
+    – **No** file contents are read, so large inputs are handled instantly.<br>
+    – If a file is edited in‑place, either its size or mtime changes ⇒ new hash.<br>
+    – If a file is *over‑written* with the same size **and** mtime preserved
+      (uncommon), the change would not be detected; trade‑off accepted.
     """
-    # Read raw bytes from the file and hash them
-    return _sha256_bytes(p.read_bytes())
+    if not p.exists():
+        raise FileNotFoundError(p)
+
+    st = p.stat()                   # single inexpensive syscall
+    payload = f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}"
+    return _sha256_bytes(payload.encode())
 
 
 def hash_scalar(x: Union[str, int, float, bool]) -> str:

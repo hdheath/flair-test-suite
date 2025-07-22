@@ -34,10 +34,10 @@ from pathlib import Path
 from typing import Dict, List
 
 from .base import StageBase             # base class for pipeline stages
-from ..core import PathBuilder          # handles stage directory creation
-from ..core.input_hash import hash_many # hashing inputs for signature
-from ..core.signature import write_marker
-from ..core.reinstate import Reinstate
+from ..lib import PathBuilder          # handles stage directory creation
+from ..lib.input_hash import hash_many # hashing inputs for signature
+from ..lib.signature import write_marker
+from ..lib.reinstate import Reinstate
 from ..qc import load_marker            # reuse loader for skip metadata
 
 
@@ -212,8 +212,8 @@ class SliceStage(StageBase):
 
         # Upstream align artifacts
         align_pb: PathBuilder = self.upstreams["align"]
-        align_bam = align_pb.stage_dir / f"{self.sample}_flair.bam"
-        align_bed = align_pb.stage_dir / f"{self.sample}_flair.bed"
+        align_bam = align_pb.stage_dir / f"{self.run_id}_flair.bam"
+        align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
 
         # Choose BED (explicit flag > corrected > align)
         bed_flag = None
@@ -229,7 +229,7 @@ class SliceStage(StageBase):
             bed_flag = (Path(root) / data_dir / flags_cfg.bed).resolve()
         elif "correct" in self.upstreams:  # prefer corrected if available
             corr_pb = self.upstreams["correct"]
-            candidate = corr_pb.stage_dir / f"{self.sample}_all_corrected.bed"
+            candidate = corr_pb.stage_dir / f"{self.run_id}_all_corrected.bed"
             bed_flag = candidate if candidate.exists() else align_bed
         else:
             bed_flag = align_bed
@@ -312,7 +312,7 @@ class SliceStage(StageBase):
         self._flags_str = " ".join(getattr(self, "_flags_components", []))
         sig = self.signature
 
-        pb = PathBuilder(self.work_dir, self.sample, self.name, sig)
+        pb = PathBuilder(self.work_dir, self.run_id, self.name, sig)
         stage_dir = pb.stage_dir
         stage_dir.mkdir(parents=True, exist_ok=True)
 

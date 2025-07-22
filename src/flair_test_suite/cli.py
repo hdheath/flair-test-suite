@@ -1,13 +1,9 @@
 # src/flair_test_suite/cli.py
 # --------------------------
-# Modified CLI to accept a *TSV file* containing relative paths (one per line)
-# to individual TOML configuration files. Each config is loaded and executed
-# independently in the order they appear in the TSV.
-#
-# The TSV is expected to be a single column. Lines beginning with '#' or blank
-# lines are ignored. Relative paths are resolved against the TSV file's parent
-# directory. If a listed config file does not exist, a warning is printed and
-# execution continues with the remaining configs.
+# Command-line interface for FLAIR test suite.
+# Accepts either:
+# 1) Path to a single TOML config: runs that config
+# 2) Path to a single-column TSV listing multiple TOMLs
 
 import click   # CLI framework
 import sys     # for sys.exit()
@@ -26,16 +22,16 @@ from .core import (
     topological_sort,
 )
 
-from typing import Dict
+from typing import Dict, Iterator
 
 
-def _iter_config_paths(tsv_path: Path):
+def _iter_config_paths(tsv_path: Path) -> Iterator[Path]:
     """Yield absolute Paths to config files listed in the TSV.
 
     Rules:
       * Skip blank lines and lines starting with '#'.
       * Use the first column before a tab (single-column TSV).
-      * Resolve relative paths against the TSV's parent directory.
+      * Resolve relative paths against the TSV file's parent directory.
     """
     for raw in tsv_path.read_text().splitlines():
         line = raw.strip()
@@ -49,17 +45,26 @@ def _iter_config_paths(tsv_path: Path):
 
 
 @click.command()
-@click.argument("config_list", type=click.Path(exists=True, path_type=Path))
-def main(config_list: Path):
+@click.argument("config_input", type=click.Path(exists=True, path_type=Path))
+def main(config_input: Path):
     """
     Main entrypoint for the CLI.
 
-    CONFIG_LIST: Path to a single-column TSV file listing relative paths to
-    TOML configuration files (one per line). Each config is executed in order.
+    CONFIG_INPUT may be either:
+      - a path to a single TOML configuration file, or
+      - a path to a single-column TSV file listing TOML config paths.
+
+    If a TSV is provided, each listed TOML is loaded and executed in order.
     """
+    # Determine if input is a list of configs or a single TOML
+    if config_input.suffix.lower() in (".tsv", ".txt"):
+        inputs = _iter_config_paths(config_input)
+    else:
+        inputs = iter([config_input])
+
     any_ran = False  # track if at least one config succeeded
 
-    for cfg_path in _iter_config_paths(config_list):
+    for cfg_path in inputs:
         if not cfg_path.exists():
             warnings.warn(f"Config file not found: {cfg_path}", UserWarning)
             continue
@@ -67,15 +72,15 @@ def main(config_list: Path):
         print(f"[INFO] Loading config: {cfg_path}")
         try:
             cfg = load_config(cfg_path)
-        except Exception as e:  # defensive: misformatted TOML, etc.
+        except Exception as e:  # misformatted TOML, etc.
             warnings.warn(f"Failed to load {cfg_path}: {e}", UserWarning)
             continue
 
-        # Determine sample name: prefer cfg.sample if set, else cfg.run.sample
-        sample = getattr(cfg, "sample", None) or getattr(cfg.run, "sample", None)
-        if not sample:
+        # Determine run identifier: prefer cfg.run_id if set, else cfg.run.run_id
+        run_id = getattr(cfg, "run_id", None) or getattr(cfg.run, "run_id", None)
+        if not run_id:
             warnings.warn(
-                f"Skipping {cfg_path} – sample must be set in the TOML file.",
+                f"Skipping {cfg_path} – run_id must be set in the TOML file.",
                 UserWarning,
             )
             continue
@@ -85,19 +90,21 @@ def main(config_list: Path):
         stage_order = topological_sort(cfg.run.stages)
 
         upstreams: Dict[str, PathBuilder] = {}
-        print(f"[INFO] Executing sample '{sample}' with {len(stage_order)} stage(s)")
+        print(f"[INFO] Executing run '{run_id}' with {len(stage_order)} stage(s)")
         for st_cfg in stage_order:
             StageCls = STAGE_REGISTRY[st_cfg.name]
-            pb = StageCls(cfg, sample, work_dir, upstreams).run()
+            pb = StageCls(cfg, run_id, work_dir, upstreams).run()
             upstreams[st_cfg.name] = pb
             print(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
         any_ran = True
 
     if not any_ran:
         raise click.UsageError(
-            "No valid configuration files were executed. Check the TSV paths."
+            "No valid configuration files were executed. Check the input paths."
         )
 
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
+
+

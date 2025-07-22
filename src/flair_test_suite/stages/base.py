@@ -1,7 +1,7 @@
 # src/flair_test_suite/stages/base.py
 # -----------------------------------
 # This abstract base class defines the common execution logic for all stages
-# in the FLAIR test suite. Each stage (e.g., align, correct, collapse) extends
+# in the FLAIR test suite. Each stage (e.g., align, correct, slice) extends
 # this class by implementing build_cmd() and expected_outputs().
 
 from __future__ import annotations
@@ -22,10 +22,10 @@ import warnings
 # compute_signature, write_marker: create a unique signature and record metadata
 # hash_many: compute a hash of input files for signature
 # Reinstate: decide whether to skip, QC-only, or run
-from ..core.paths      import PathBuilder
-from ..core.signature  import compute_signature, write_marker
-from ..core.input_hash import hash_many
-from ..core.reinstate  import Reinstate
+from ..lib.paths      import PathBuilder
+from ..lib.signature  import compute_signature, write_marker
+from ..lib.input_hash import hash_many
+from ..lib.reinstate  import Reinstate
 
 # QC lives in its own top-level package:
 # QC_REGISTRY: maps stage names to collector functions
@@ -56,14 +56,14 @@ class StageBase(ABC):
     def __init__(
         self,
         cfg,
-        sample: str,
+        run_id: str,
         work_dir: Path,
         upstreams: Dict[str, PathBuilder] | None = None,
     ):
         # Configuration namespace (parsed from TOML)
         self.cfg = cfg
-        # Sample name string
-        self.sample = sample
+        # Run identifier (used as a sub-directory)
+        self.run_id = run_id
         # Root directory for all outputs
         self.work_dir = work_dir
         # PathBuilder objects for previously-run stages
@@ -89,8 +89,8 @@ class StageBase(ABC):
         self._flags_str = " ".join(getattr(self, "_flags_components", []))
         sig = self.signature  # compute or return existing
 
-        # 3) Prepare the stage directory: work_dir/sample/name/sig
-        pb = PathBuilder(self.work_dir, self.sample, self.name, sig)
+        # 3) Prepare the stage directory: work_dir/run_id/name/sig
+        pb = PathBuilder(self.work_dir, self.run_id, self.name, sig)
         stage_dir = pb.stage_dir
         stage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -121,7 +121,6 @@ class StageBase(ABC):
         # --- skip case: tool already ran & QC exists ---
         if action == "skip":
             print(f"[SKIP] {self.name} complete (sig={sig})")
-            # Reload QC metrics from the existing marker for downstream use
             marker_f = stage_dir / ".completed.json"
             try:
                 full_meta = load_marker(marker_f)
@@ -135,7 +134,6 @@ class StageBase(ABC):
             print(f"[QC]   Regenerating QC for {self.name} (sig={sig})")
             qc_metrics = self._run_qc(stage_dir, primary, runtime=None)
             pb.metadata = qc_metrics
-            # Update the marker with the new QC block
             marker_f = stage_dir / ".completed.json"
             old_meta = load_marker(marker_f)
             old_meta["qc"] = qc_metrics
@@ -149,11 +147,10 @@ class StageBase(ABC):
             exit_code = subprocess.call(cmd, cwd=stage_dir, stdout=out, stderr=err)
             if exit_code != 0:
                 warnings.warn(
-                        f"External tool for stage {self.name} exited with code {exit_code}",
-                        UserWarning
-                    )
+                    f"External tool for stage {self.name} exited with code {exit_code}",
+                    UserWarning
+                )
         runtime = round(time.time() - start, 2)
-        # After run, verify primary output
         if not primary.exists():
             warnings.warn(
                 f"Stage {self.name} completed but primary output missing: {primary}",
@@ -189,7 +186,7 @@ class StageBase(ABC):
     ) -> Dict:
         """
         Internal helper to invoke the registered QC collector function.
-        Returns the metrics dict or an empty dict on failure.
+        Returns metrics dict or empty dict.
         """
         qc_func = QC_REGISTRY.get(self.name)
         if not qc_func or not primary.exists():
@@ -208,8 +205,7 @@ class StageBase(ABC):
     @property
     def signature(self) -> str:
         """
-        Compute or return the unique signature for this stage run,
-        based on the tool version, flags, and input hashes.
+        Compute or return the stage signature based on tool, flags, and inputs.
         """
         if not hasattr(self, "_sig"):
             self._sig = compute_signature(
@@ -221,7 +217,7 @@ class StageBase(ABC):
 
     @property
     def tool_version(self) -> str:
-        """Default tool version; overridden in subclasses if needed."""
+        """Default tool version; override in subclasses if needed."""
         return "flair-unknown"
 
     @property

@@ -11,8 +11,8 @@ import subprocess        # to invoke external commands
 from pathlib import Path # for filesystem paths
 
 from .base import StageBase       # base class providing orchestration logic
-from ..core import PathBuilder    # builder for output directories
-from ..core.input_hash import hash_many  # to hash input files
+from ..lib import PathBuilder    # builder for output directories
+from ..lib.input_hash import hash_many  # to hash input files
 
 class AlignStage(StageBase):
     """
@@ -74,7 +74,7 @@ class AlignStage(StageBase):
 
         # Conda environment and output prefix for CLI
         env        = cfg.run.conda_env
-        out_prefix = f"{self.sample}_flair"
+        out_prefix = f"{self.run_id}_flair"
 
         # --- parse flags from the config for this stage ---
         raw_flags = cfg.run.stages[0].flags  # first [[run.stages]] entry
@@ -172,7 +172,7 @@ class AlignStage(StageBase):
         Map logical output names to file paths within the stage directory.
         'bam' and 'bed' are the primary FLAIR outputs.
         """
-        base = f"{self.sample}_flair"
+        base = f"{self.run_id}_flair"
         return {
             "bam": Path(f"{base}.bam"),
             "bed": Path(f"{base}.bed"),

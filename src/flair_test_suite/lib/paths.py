@@ -95,3 +95,4 @@ class PathBuilder:
           - hex digest string
         """
         return hashlib.sha256(txt.encode()).hexdigest()
+

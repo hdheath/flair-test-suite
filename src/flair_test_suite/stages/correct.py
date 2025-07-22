@@ -9,7 +9,7 @@ import warnings          # to emit runtime warnings
 from pathlib import Path  # for filesystem path operations
 
 from .base import StageBase  # base class providing run() and QC logic
-from ..core import PathBuilder  # constructs stage directories
+from ..lib import PathBuilder  # constructs stage directories
 
 
 class CorrectStage(StageBase):
@@ -55,7 +55,7 @@ class CorrectStage(StageBase):
 
         # --- locate files produced by align in its stage directory ---
         align_pb: PathBuilder = self.upstreams["align"]
-        align_bed = align_pb.stage_dir / f"{self.sample}_flair.bed"
+        align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
         if not align_bed.exists():
             warnings.warn(
                 f"Expected align output BED not found: {align_bed}",
@@ -128,7 +128,7 @@ class CorrectStage(StageBase):
             "conda", "run", "-n", env,
             "flair", "correct",
             "-q", str(align_bed),       # input BED from align
-            "-o", self.sample,          # prefix for output files
+            "-o", self.run_id,          # prefix for output files
             *flag_parts,                 # include parsed flags
         ]
 
@@ -136,10 +136,10 @@ class CorrectStage(StageBase):
     def expected_outputs(self) -> dict[str, Path]:
         """
         Define the output files produced by this stage:
-        - <sample>_all_corrected.bed
-        - <sample>_all_inconsistent.bed
+        - <run_id>_all_corrected.bed
+        - <run_id>_all_inconsistent.bed
         """
-        base = f"{self.sample}_all"
+        base = f"{self.run_id}_all"
         return {
             "corrected":    Path(f"{base}_corrected.bed"),
             "inconsistent": Path(f"{base}_inconsistent.bed"),
