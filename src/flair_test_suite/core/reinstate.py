@@ -46,9 +46,10 @@ class Reinstate:
         # For QC: need side‑car TSV *and* a "qc" block in marker
         if needs_qc:
             qc_tsv = qc_sidecar_path(stage_dir, stage_name)
-            qc_ok = qc_tsv.exists() and load_marker(stage_dir).get("qc")
+            # trust the TSV file, regardless of marker content
+            qc_ok = qc_tsv.exists()
         else:
-            qc_ok = True  # QC not required
+            qc_ok = True
 
         if marker_ok and primary_ok and qc_ok:
             return "skip"
