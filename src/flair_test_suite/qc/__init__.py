@@ -70,7 +70,7 @@ def load_marker(marker_f: Path) -> dict:
 # ---------------------------------------------------------------------
 # 2) Auto‑import plug‑ins ---------------------------------------------
 # Dynamically load each collector module so its @register decorator runs
-for _name in ("align_qc", "correct_qc"):
+for _name in ("align_qc", "correct_qc" , "region_qc"):
     import_module(f"{__name__}.{_name}")
 
 # Placeholder: add new QC collector modules here as needed

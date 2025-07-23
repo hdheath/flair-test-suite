@@ -40,6 +40,7 @@ from ..lib.signature import write_marker
 from ..lib.reinstate import Reinstate
 from ..qc import load_marker            # reuse loader for skip metadata
 from .stage_utils import resolve_path
+from ..qc import QC_REGISTRY
 
 class SliceStage(StageBase):
     """Stage that slices region-specific subsets of upstream outputs."""
@@ -49,11 +50,7 @@ class SliceStage(StageBase):
 
     @staticmethod
     def _read_regions(tsv: Path) -> List[Tuple[str, int, int]]:
-        """Parse a 3-column TSV into (chrom,start,end) tuples.
-
-        Skips blank / commented lines. Emits warnings for malformed lines.
-        Raises if no valid regions are parsed.
-        """
+        """Parse a 3-column TSV into (chrom,start,end) tuples."""
         regions: List[Tuple[str, int, int]] = []
         for ln_no, raw in enumerate(tsv.read_text().splitlines(), start=1):
             line = raw.strip()
@@ -91,22 +88,20 @@ class SliceStage(StageBase):
         """Slice a BAM file using samtools; warn if no reads in slice."""
         if out_bam.exists():
             return
-        # Create BAM slice then index
         self._run(
             ["samtools", "view", "-b", str(full_bam), f"{chrom}:{start}-{end}"],
             stdout=open(out_bam, "wb"),
         )
         self._run(["samtools", "index", str(out_bam)])
-        # Count reads; emit warning if zero
         try:
-            count = subprocess.check_output(
-                ["samtools", "view", "-c", str(out_bam)], text=True
-            ).strip()
+            count = subprocess.check_output([
+                "samtools", "view", "-c", str(out_bam)
+            ], text=True).strip()
             if count == "0":
                 warnings.warn(
                     f"No alignments in {out_bam.name} for region {tag}", UserWarning
                 )
-        except Exception as e:  # defensive: samtools not installed / etc.
+        except Exception as e:
             warnings.warn(
                 f"Failed to count alignments in {out_bam.name}: {e}", UserWarning
             )
@@ -122,12 +117,7 @@ class SliceStage(StageBase):
         col_start=2,
         col_end=3,
     ):
-        """Slice arbitrary BED-like file using AWK.
-
-        Current predicate performs *full containment* (${col_start}>=start &&
-        ${col_end}<=end). To change to *overlap* semantics, adjust the AWK
-        condition to `${col_end}>=start && ${col_start}<=end`.
-        """
+        """Slice arbitrary BED-like file using AWK."""
         if not in_path or not in_path.exists():
             return
         if out_path.exists():
@@ -143,11 +133,7 @@ class SliceStage(StageBase):
     def _slice_gtf(
         self, gtf_path: Path, chrom: str, start: int, end: int, out_path: Path, tag: str
     ):
-        """Slice GTF; retains genes/transcripts fully contained within span.
-
-        This mirrors the legacy slicer logic. Relax by changing the final
-        containment checks to any-overlap if desired.
-        """
+        """Slice GTF; retains genes/transcripts fully contained within span."""
         if out_path.exists():
             return
         import re
@@ -195,17 +181,14 @@ class SliceStage(StageBase):
         root = Path(cfg.run.input_root)
         data_dir = Path(cfg.run.data_dir)
 
-        # Upstream align artifacts
         align_pb: PathBuilder = self.upstreams["align"]
         align_bam = align_pb.stage_dir / f"{self.run_id}_flair.bam"
         align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
 
-        # Flags config for slice stage
         flags_cfg = next((st.flags for st in cfg.run.stages if st.name == "slice"), None)
         if flags_cfg is None:
             raise RuntimeError("slice stage flags missing in TOML")
 
-        # Select BED: explicit > corrected > align
         if getattr(flags_cfg, "bed", None):
             bed_flag = resolve_path(flags_cfg.bed, root=root, data_dir=data_dir)
         elif "correct" in self.upstreams:
@@ -215,7 +198,6 @@ class SliceStage(StageBase):
         else:
             bed_flag = align_bed
 
-        # Mandatory inputs
         gtf_path = resolve_path(flags_cfg.gtf, root=root, data_dir=data_dir)
         regions_tsv = resolve_path(flags_cfg.regions_tsv, root=root, data_dir=data_dir)
         if not gtf_path.exists():
@@ -223,7 +205,6 @@ class SliceStage(StageBase):
         if not regions_tsv.exists():
             raise RuntimeError(f"regions_tsv not found: {regions_tsv}")
 
-        # Optional inputs
         opt_keys = [
             "junctions",
             "experiment_5_prime_regions_bed_file",
@@ -240,10 +221,7 @@ class SliceStage(StageBase):
                 if not p.exists():
                     warnings.warn(f"Optional slice file missing: {p}", UserWarning)
 
-        # Parse regions
         self._regions = self._read_regions(regions_tsv)
-
-        # Inputs to hash for reproducibility
         self._hash_inputs = [align_bam, bed_flag, gtf_path, regions_tsv, align_pb.signature]
         if "correct" in self.upstreams:
             self._hash_inputs.append(self.upstreams["correct"].signature)
@@ -251,7 +229,6 @@ class SliceStage(StageBase):
             if p.exists():
                 self._hash_inputs.append(p)
 
-        # Flags for signature
         parts = [
             f"--bam={align_bam}",
             f"--bed={bed_flag}",
@@ -259,8 +236,11 @@ class SliceStage(StageBase):
             f"--regions-tsv={regions_tsv}",
         ] + [f"--{k.replace('_','-')}={p}" for k, p in self._optional_files.items()]
         self._flags_components = parts
-
-        return []  # not used; slicing is internal
+        # store resolved paths from build_cmd for slicing and QC
+        self._align_bam = align_bam
+        self._bed_file = bed_flag
+        self._gtf_path = gtf_path
+        return []
 
     def expected_outputs(self) -> Dict[str, Path]:
         return {"manifest": Path("slices_manifest.tsv")}  
@@ -283,90 +263,16 @@ class SliceStage(StageBase):
         stage_dir = pb.stage_dir
         stage_dir.mkdir(parents=True, exist_ok=True)
 
-        primary = stage_dir / "slices_manifest.tsv"
-        action = Reinstate.decide(
-            stage_dir,
-            primary,
-            needs_qc=False,
-            stage_name=self.name,
-        )
-        if action == "skip":
-            print(f"[SKIP] {self.name} complete (sig={sig})")
-            try:
-                meta = load_marker(stage_dir / ".completed.json")
-                pb.metadata = meta.get("qc", {})
-            except FileNotFoundError:
-                pb.metadata = {}
-            return pb
-
-    # ------------------------- internal slicing driver -----------------------
-    def _execute_slicing(self, stage_dir: Path):
-        """Iterate user-defined regions and slice all requested inputs."""
-        regions_root = stage_dir / "regions"
-        regions_root.mkdir(exist_ok=True)
-
-        manifest_rows = []
-        for chrom, start, end in self._regions:
-            tag = f"{chrom}_{start}_{end}"
-            region_dir = regions_root / tag
-            region_dir.mkdir(parents=True, exist_ok=True)
-
-            bam_slice = region_dir / f"{tag}.bam"
-            bed_slice = region_dir / f"{tag}.bed"
-            gtf_slice = region_dir / f"{tag}.gtf"
-
-            # BAM slice
-            try:
-                self._slice_bam(self._align_bam, chrom, start, end, bam_slice, tag)
-            except Exception as e:
-                warnings.warn(f"Failed BAM slice {tag}: {e}", UserWarning)
-
-            # BED slice (if bed file exists)
-            if self._bed_file and self._bed_file.exists():
-                try:
-                    self._awk_slice(self._bed_file, chrom, start, end, bed_slice, tag)
-                except Exception as e:
-                    warnings.warn(f"Failed BED slice {tag}: {e}", UserWarning)
-
-            # GTF slice
-            if self._gtf_path.exists():
-                try:
-                    self._slice_gtf(self._gtf_path, chrom, start, end, gtf_slice, tag)
-                except Exception as e:
-                    warnings.warn(f"Failed GTF slice {tag}: {e}", UserWarning)
-
-            # Junctions
-            junc = self._optional_files.get("junctions")
-            if junc and junc.exists():
-                self._awk_slice(junc, chrom, start, end, region_dir / f"{tag}.tab", tag)
-
-            # Experiment 5'/3'
-            exp5 = self._optional_files.get("experiment_5_prime_regions_bed_file")
-            if exp5 and exp5.exists():
-                self._awk_slice(exp5, chrom, start, end, region_dir / f"{tag}.exp5.bed", tag)
-            exp3 = self._optional_files.get("experiment_3_prime_regions_bed_file")
-            if exp3 and exp3.exists():
-                self._awk_slice(exp3, chrom, start, end, region_dir / f"{tag}.exp3.bed", tag)
-
-            # Reference 5'/3'
-            ref5 = self._optional_files.get("reference_5_prime_regions_bed_file")
-            if ref5 and ref5.exists():
-                self._awk_slice(ref5, chrom, start, end, region_dir / f"{tag}.ref5.bed", tag)
-            ref3 = self._optional_files.get("reference_3_prime_regions_bed_file")
-            if ref3 and ref3.exists():
-                self._awk_slice(ref3, chrom, start, end, region_dir / f"{tag}.ref3.bed", tag)
-
-            manifest_rows.append([chrom, start, end, str(region_dir)])
-
-        # Write manifest summarising all region directories
-        with open(stage_dir / "slices_manifest.tsv", "w", newline="") as fh:
-            w = csv.writer(fh, delimiter="	")
-            w.writerow(["chrom", "start", "end", "region_dir"])
-            w.writerows(manifest_rows)
-
+        manifest = stage_dir / "slices_manifest.tsv"
         start = time.time()
         self._execute_slicing(stage_dir)
         runtime = round(time.time() - start, 2)
+
+        # run region_qc collector if registered
+        qc_fn = QC_REGISTRY.get(self.name)
+        qc_metrics = {}
+        if qc_fn:
+            qc_metrics = qc_fn(manifest, stage_dir, runtime_sec=runtime)
 
         meta = {
             "stage": self.name,
@@ -377,7 +283,55 @@ class SliceStage(StageBase):
             "started": datetime.fromtimestamp(start, timezone.utc).isoformat(),
             "ended": datetime.now(timezone.utc).isoformat(),
             "host": platform.node(),
-            "qc": {},
+            "qc": qc_metrics,
         }
         write_marker(pb, meta)
         return pb
+
+    def _execute_slicing(self, stage_dir: Path):
+        """Iterate user-defined regions and slice all requested inputs."""
+        regions_root = stage_dir / "regions"
+        regions_root.mkdir(exist_ok=True)
+
+        manifest_rows: List[List[str]] = []
+        for chrom, start, end in self._regions:
+            tag = f"{chrom}_{start}_{end}"
+            region_dir = regions_root / tag
+            region_dir.mkdir(parents=True, exist_ok=True)
+
+            bam_slice = region_dir / f"{tag}.bam"
+            bed_slice = region_dir / f"{tag}.bed"
+            gtf_slice = region_dir / f"{tag}.gtf"
+
+            try:
+                self._slice_bam(self._align_bam, chrom, start, end, bam_slice, tag)
+            except Exception as e:
+                warnings.warn(f"Failed BAM slice {tag}: {e}", UserWarning)
+
+            if self._bed_file and self._bed_file.exists():
+                try:
+                    self._awk_slice(self._bed_file, chrom, start, end, bed_slice, tag)
+                except Exception as e:
+                    warnings.warn(f"Failed BED slice {tag}: {e}", UserWarning)
+
+            if self._gtf_path.exists():
+                try:
+                    self._slice_gtf(self._gtf_path, chrom, start, end, gtf_slice, tag)
+                except Exception as e:
+                    warnings.warn(f"Failed GTF slice {tag}: {e}", UserWarning)
+
+            for key, fpath in self._optional_files.items():
+                out_file = region_dir / f"{tag}.{key.replace('_', '.') }"
+                if fpath and fpath.exists():
+                    try:
+                        self._awk_slice(fpath, chrom, start, end, out_file, tag)
+                    except Exception as e:
+                        warnings.warn(f"Failed slice for {key} {tag}: {e}", UserWarning)
+
+            manifest_rows.append([chrom, str(start), str(end), str(region_dir)])
+
+        # write manifest
+        with open(stage_dir / "slices_manifest.tsv", "w", newline="") as fh:
+            writer = csv.writer(fh, delimiter="\t")
+            writer.writerow(["chrom", "start", "end", "region_dir"] + list(self._optional_files.keys()))
+            writer.writerows(manifest_rows)

@@ -51,8 +51,8 @@ def main(config_input: Path):
     Main entrypoint for the CLI.
 
     CONFIG_INPUT may be either:
-      - a path to a single TOML configuration file, or
-      - a path to a single-column TSV file listing TOML config paths.
+      - a path to a single TOML configuration file, or 
+      - a path to a single-column TSV file listing TOML config paths. 
 
     If a TSV is provided, each listed TOML is loaded and executed in order.
     """
