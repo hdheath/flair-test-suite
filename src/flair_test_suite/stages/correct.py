@@ -90,7 +90,12 @@ class CorrectStage(StageBase):
 
         # --- construct final command ---
         env = cfg.run.conda_env
-        return [
+
+        # Parse major version
+        flair_version = str(cfg.run.version)
+        major_version = int(flair_version.split(".")[0])
+    
+        cmd = [
             "conda", "run", "-n", env,
             "flair", "correct",
             "-q", str(align_bed),
@@ -98,6 +103,12 @@ class CorrectStage(StageBase):
             *flag_parts,
         ]
 
+        # Only add genome argument for FLAIR < 3
+        if major_version < 3:
+            cmd.extend(["-g", str(genome)])
+
+        return cmd
+        
     def expected_outputs(self) -> dict[str, Path]:
         """
         Define the output files produced by this stage:

@@ -20,6 +20,7 @@ def collect(
     bed: Path,
     out_dir: Path,
     n_input_reads: int,
+    align_sig: str,
     runtime_sec: float | None = None,
 ) -> dict:
     """QC collector for the correct stage.
@@ -45,18 +46,20 @@ def collect(
     # unique junctions before correction (from align QC TSV)
     uniq_before = None
     try:
-        run_dir = out_dir.parent  # outputs/<run_id>/
-        align_stage_dir = next((p for p in (run_dir / "align").iterdir() if p.is_dir()), None)
-        if align_stage_dir:
-            qc_tsv = qc_sidecar_path(align_stage_dir, "align")
-            if qc_tsv.exists():
-                with open(qc_tsv) as fh:
-                    for line in fh:
-                        if line.startswith("unique_junctions\t"):
-                            uniq_before = int(line.split("\t")[1])
-                            break
-    except Exception:
-        # leave uniq_before as None on any error
+        run_dir = out_dir.parent.parent  # outputs/<run_id>/
+        align_stage_dir = run_dir / "align" / align_sig
+        qc_tsv = qc_sidecar_path(align_stage_dir, "align")
+        print("QC TSV path:", qc_tsv)  # <-- Place this here
+        if align_stage_dir.is_dir() and qc_tsv.exists():
+            with open(qc_tsv) as fh:
+                next(fh)  # skip header
+                for line in fh:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) == 2 and parts[0] == "unique_junctions":
+                        uniq_before = int(parts[1])
+                        break
+    except Exception as e:
+        print("Error reading align QC:", e)
         pass
 
     # assemble QC metrics

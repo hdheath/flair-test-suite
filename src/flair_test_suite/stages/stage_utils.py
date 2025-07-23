@@ -66,7 +66,10 @@ def parse_cli_flags(
     extra_inputs: List[Path] = []
 
     def _push(k: str, v: str | int | None = None):
-        flag_parts.append(f"--{k}")
+        if len(k) == 1:
+            flag_parts.append(f"-{k}")
+        else:
+            flag_parts.append(f"--{k}")
         if v not in (None, "", True):
             flag_parts.append(str(v))
 
@@ -83,3 +86,38 @@ def parse_cli_flags(
             extra_inputs.append(p)
 
     return flag_parts, extra_inputs
+
+def filter_file_by_regions(src: Path, out: Path, lookup, filetype: str):
+    """
+    Filter lines from src by region containment and write to out.
+    filetype: "bed", "tab", "gtf"
+    """
+    if filetype == "bed":
+        start_i, end_i, add1 = 1, 2, True
+    elif filetype == "tab":
+        start_i, end_i, add1 = 1, 2, False
+    elif filetype == "gtf":
+        start_i, end_i, add1 = 3, 4, False
+    else:
+        warnings.warn(f"Unsupported filetype for filtering: {filetype}", UserWarning)
+        return
+    kept = 0
+    with open(src) as inf, open(out, "w") as outf:
+        for ln, L in enumerate(inf, 1):
+            if not L.strip() or L.startswith("#"): continue
+            parts = L.rstrip("\n").split("\t")
+            if len(parts) <= max(start_i, end_i):
+                warnings.warn(f"{src.name} line {ln}: insufficient cols", UserWarning)
+                continue
+            chrom = parts[0]
+            try:
+                s = int(parts[start_i]) + (1 if add1 else 0)
+                e = int(parts[end_i])
+            except ValueError:
+                warnings.warn(f"{src.name} line {ln}: bad coords", UserWarning)
+                continue
+            if lookup.contains(chrom, s, e):
+                outf.write(L)
+                kept += 1
+    if kept == 0:
+        warnings.warn(f"{out.name} empty after filtering", UserWarning)

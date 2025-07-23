@@ -184,20 +184,27 @@ class StageBase(ABC):
         primary: Path,
         runtime: float | None
     ) -> Dict:
-        """
-        Internal helper to invoke the registered QC collector function.
-        Returns metrics dict or empty dict.
-        """
         qc_func = QC_REGISTRY.get(self.name)
         if not qc_func or not primary.exists():
             return {}
         try:
-            return qc_func(
-                primary,
-                out_dir=stage_dir,
-                n_input_reads=getattr(self, "_n_input_reads", None),
-                runtime_sec=runtime,
-            )
+            if self.name == "correct":
+                # Pass align signature for correct QC
+                align_sig = self.upstreams["align"].signature if "align" in self.upstreams else None
+                return qc_func(
+                    primary,
+                    out_dir=stage_dir,
+                    n_input_reads=getattr(self, "_n_input_reads", None),
+                    align_sig=align_sig,
+                    runtime_sec=runtime,
+                )
+            else:
+                return qc_func(
+                    primary,
+                    out_dir=stage_dir,
+                    n_input_reads=getattr(self, "_n_input_reads", None),
+                    runtime_sec=runtime,
+                )
         except Exception as e:
             print(f"[WARN] QC for '{self.name}' failed: {e}")
             return {}
