@@ -11,50 +11,40 @@ import subprocess        # to invoke external commands
 from pathlib import Path # for filesystem paths
 
 from .base import StageBase       # base class providing orchestration logic
-from ..lib import PathBuilder    # builder for output directories
 from ..lib.input_hash import hash_many  # to hash input files
+from .stage_utils import (
+    count_reads,
+    resolve_path,
+    parse_cli_flags,
+)
 
 class AlignStage(StageBase):
     """
     Run `flair align` and record input-read count for QC.
     Inherits common behavior (run(), signature, skip/QC logic) from StageBase.
     """
-    # Unique name used for registry lookup and QC tagging
     name = "align"
-
-    @staticmethod
-    def _count_reads(fp: Path) -> int:
-        """
-        Return the number of reads in a FASTA/FASTQ file.
-        - FASTA: count lines starting with '>'.
-        - FASTQ: assume 4 lines per record, divide total lines by 4.
-        """
-        if fp.suffix.lower() in {".fa", ".fasta"}:
-            # FASTA mode: header lines start with '>'
-            return sum(1 for ln in fp.open() if ln.startswith(">"))
-        else:
-            # FASTQ mode: 4 lines per read
-            return sum(1 for _ in fp.open()) // 4
 
     def build_cmd(self) -> list[str]:
         """
-        Construct the command to invoke `flair align`.
-        Also prepares:
+        Construct the command to invoke `flair align` using shared helpers.
+        Prepares:
         - self._n_input_reads: for QC collector
         - self._hash_inputs: list of Paths whose contents/signature matter
         - self._flags_components: list of CLI flags for signature
         """
         cfg = self.cfg
 
-        # --- resolve input paths, allowing override at top-level or under run ---
-        root       = getattr(cfg, "input_root", None) or cfg.run.input_root
-        data_dir   = getattr(cfg, "data_dir",   None) or cfg.run.data_dir
-        reads_file = getattr(cfg, "reads_file", None) or cfg.run.reads_file
-        genome_fa  = getattr(cfg, "genome_fa",  None) or cfg.run.genome_fa
+        # --- resolve input paths, allowing overrides at top-level or under run ---
+        root = Path(getattr(cfg, "input_root", None) or cfg.run.input_root)
+        data_dir = Path(getattr(cfg, "data_dir", None) or cfg.run.data_dir)
 
-        # Absolute paths to the reads and genome files
-        reads  = (Path(root) / data_dir / reads_file).resolve()
-        genome = (Path(root) / data_dir / genome_fa).resolve()
+        reads_file = getattr(cfg, "reads_file", None) or cfg.run.reads_file
+        genome_fa = getattr(cfg, "genome_fa", None) or cfg.run.genome_fa
+
+        # Absolute paths using shared resolve_path
+        reads = resolve_path(reads_file, root=root, data_dir=data_dir)
+        genome = resolve_path(genome_fa, root=root, data_dir=data_dir)
 
         # --- warn on missing or empty inputs ---
         if not reads.exists():
@@ -65,70 +55,27 @@ class AlignStage(StageBase):
             warnings.warn(f"Genome FASTA not found: {genome}", UserWarning)
 
         # --- count reads for QC and warn if zero ---
-        self._n_input_reads = self._count_reads(reads)
+        self._n_input_reads = count_reads(reads)
         if self._n_input_reads == 0:
             warnings.warn(f"No reads counted in {reads}", UserWarning)
 
         # --- inputs that affect the signature ---
         self._hash_inputs = [reads, genome]
 
-        # Conda environment and output prefix for CLI
-        env        = cfg.run.conda_env
-        out_prefix = f"{self.run_id}_flair"
-
         # --- parse flags from the config for this stage ---
-        raw_flags = cfg.run.stages[0].flags  # first [[run.stages]] entry
-        flag_parts: list[str] = []
-
-        def _switch(k: str):
-            # ensure flags begin with '--'
-            flag_parts.append(k if k.startswith("--") else f"--{k}")
-
-        if isinstance(raw_flags, list):
-            # list of strings: use directly
-            flag_parts.extend(raw_flags)
-
-        elif isinstance(raw_flags, str):
-            # space-separated string: split on whitespace
-            flag_parts.extend(raw_flags.split())
-
-        else:
-            # TOML table: iterate attributes
-            for key, val in vars(raw_flags).items():
-                if val is False:
-                    # user explicitly disabled this flag
-                    continue
-                if val in ("", None, True):
-                    # boolean or switch flag (no value)
-                    _switch(key)
-                elif isinstance(val, (int, float)):
-                    # numeric flag: add key and value
-                    _switch(key)
-                    flag_parts.append(str(val))
-                else:
-                    # file path flag: resolve relative to root/data_dir
-                    p = Path(val)
-                    if not p.is_absolute():
-                        p = (Path(root) / data_dir / p).resolve()
-                    _switch(key)
-                    flag_parts.append(str(p))
-                    # include file in signature if it exists, warn otherwise
-                    if p.exists():
-                        self._hash_inputs.append(p)
-                    else:
-                        warnings.warn(f"Flag file {p} does not exist; skipping it", UserWarning)
-
-        # store flags for signature computation
+        raw_flags = cfg.run.stages[0].flags
+        flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
+        # include any additional files flagged for signature
+        self._hash_inputs.extend(extra_inputs)
         self._flags_components = flag_parts
 
         # --- capture `flair --version` once per run to include in signature ---
         if not hasattr(self, "_tool_version"):
             try:
                 raw = subprocess.check_output(
-                    ["conda", "run", "-n", env, "flair", "--version"],
+                    ["conda", "run", "-n", cfg.run.conda_env, "flair", "--version"],
                     text=True
                 ).strip()
-                # take last non-empty line
                 self._tool_version = raw.splitlines()[-1] if raw else "flair-unknown"
             except subprocess.CalledProcessError:
                 warnings.warn("Could not run `flair --version`; using 'flair-unknown'", UserWarning)
@@ -142,9 +89,10 @@ class AlignStage(StageBase):
         if not flag_parts:
             warnings.warn("No extra flags configured for align stage; using defaults", UserWarning)
 
-        # --- return the final command list for subprocess.call() ---
+        # --- construct and return the final command list ---
+        out_prefix = f"{self.run_id}_flair"
         return [
-            "conda", "run", "-n", env,
+            "conda", "run", "-n", cfg.run.conda_env,
             "flair", "align",
             "-g", str(genome),
             "-r", str(reads),
@@ -181,3 +129,4 @@ class AlignStage(StageBase):
     # QC is invoked automatically by StageBase if a collector is registered
     def collect_qc(self, pb):
         return {}  # no-op here; actual QC logic lives in qc/align_qc.py
+

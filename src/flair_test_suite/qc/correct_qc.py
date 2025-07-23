@@ -1,62 +1,77 @@
 # src/flair_test_suite/qc/correct_qc.py
 # ----------------------------------
-# QC collector for the 'correct' stage.
-# Computes retention metrics after correction and writes them to a TSV side‑car.
+# QC collector for the 'correct' stage (revamped).
+#  • Reports reads removed (count & %)
+#  • Counts unique splice junctions before vs after correction
+#  • Records both correct‑stage and QC runtimes
 
 from __future__ import annotations
-import subprocess      # to run shell commands (e.g., wc)
 from pathlib import Path
+import time
 
-# import the registry decorator and helper to write TSVs
-from . import register, write_metrics
+from . import register, write_metrics, qc_sidecar_path
+from .qc_utils import count_lines, percent, count_unique_junctions
+
+__all__ = ["collect"]
 
 
-@register("correct")  # registers this function under QC_REGISTRY['correct']
+@register("correct")
 def collect(
     bed: Path,
     out_dir: Path,
     n_input_reads: int,
     runtime_sec: float | None = None,
 ) -> dict:
+    """QC collector for the correct stage.
+
+    Reports:
+      • n_input_reads, n_corrected_reads
+      • n_removed_reads, removed_pct
+      • unique_junc_before (from align QC)
+      • unique_junc_after (recount)
+      • correct_runtime_sec (stage runtime)
+      • qc_runtime_sec (time to compute these QC metrics)
     """
-    QC collector for the correct stage.
+    qc_start = time.time()
 
-    Parameters:
-      - bed: Path to the BED output of flair correct
-      - out_dir: Directory where side‑cars should be written
-      - n_input_reads: Number of reads input into correct stage
-      - runtime_sec: Optional runtime in seconds (from StageBase)
+    # reads retained / removed
+    n_corrected = count_lines(bed)
+    n_removed = n_input_reads - n_corrected
+    removed_pct = percent(n_removed, n_input_reads)
 
-    Returns:
-      - metrics dict containing counts and retention percentage
-    """
-    # Count number of lines in the BED (each line = one corrected read)
-    retained = int(
-        subprocess.check_output(
-            ["wc", "-l", str(bed)], text=True
-        ).split()[0]
-    )
+    # unique junctions after correction
+    uniq_after = count_unique_junctions(bed)
 
-    # Compute percentage of reads retained after correction
-    retained_pct = round(100 * retained / n_input_reads, 2)
+    # unique junctions before correction (from align QC TSV)
+    uniq_before = None
+    try:
+        run_dir = out_dir.parent  # outputs/<run_id>/
+        align_stage_dir = next((p for p in (run_dir / "align").iterdir() if p.is_dir()), None)
+        if align_stage_dir:
+            qc_tsv = qc_sidecar_path(align_stage_dir, "align")
+            if qc_tsv.exists():
+                with open(qc_tsv) as fh:
+                    for line in fh:
+                        if line.startswith("unique_junctions\t"):
+                            uniq_before = int(line.split("\t")[1])
+                            break
+    except Exception:
+        # leave uniq_before as None on any error
+        pass
 
-    # Prepare the metrics dictionary:
+    # assemble QC metrics
     metrics = {
-        # original input read count passed from align stage
-        "n_input_reads":     n_input_reads,
-        # number of reads in the corrected BED file
-        "n_corrected_reads": retained,
-        # percent retained after correction
-        "retained_pct":      retained_pct,
+        "n_input_reads":      n_input_reads,
+        "n_corrected_reads":  n_corrected,
+        "n_removed_reads":    n_removed,
+        "removed_pct":        removed_pct,
+        "unique_junc_before": uniq_before,
+        "unique_junc_after":  uniq_after,
+        "correct_runtime_sec": round(runtime_sec, 2) if runtime_sec is not None else None,
+        "qc_runtime_sec":     round(time.time() - qc_start, 2),
     }
 
-    # If runtime was provided, include it rounded to 2 decimals
-    if runtime_sec is not None:
-        metrics["runtime_sec"] = round(runtime_sec, 2)
-
-    # Write metrics out to <out_dir>/correct_qc.tsv via the helper
     write_metrics(out_dir, "correct", metrics)
-
-    # Return metrics dict so StageBase can embed it in .metadata
     return metrics
+
 

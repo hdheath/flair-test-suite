@@ -5,12 +5,15 @@
 # Inherits common orchestration, skip/QC/run logic from StageBase.
 
 from __future__ import annotations
+
 import warnings          # to emit runtime warnings
 from pathlib import Path  # for filesystem path operations
 
-from .base import StageBase  # base class providing run() and QC logic
-from ..lib import PathBuilder  # constructs stage directories
-
+from .base import StageBase           # base class providing run() and QC logic
+from .stage_utils import (
+    resolve_path,
+    parse_cli_flags,
+)
 
 class CorrectStage(StageBase):
     """
@@ -19,27 +22,22 @@ class CorrectStage(StageBase):
     - Runs `flair correct` with junction and GTF flags
     - Skips or regenerates QC based on existing outputs
     """
-    # Unique identifier used by StageBase and QC registry
     name = "correct"
-    # This stage depends on the align stage having completed
     requires = ("align",)
-    # Which key in expected_outputs() is the primary file to check
     primary_output_key = "corrected"
 
-    # ------------------------------------------------------------------ #
     def build_cmd(self) -> list[str]:
         """
         Assemble the command to run `flair correct`.
         Also prepares:
         - self._n_input_reads: from align metadata for QC
-        - self._hash_inputs: inputs affecting signature (BED + genome)
+        - self._hash_inputs: inputs affecting signature (BED + genome + any extra flag files + upstream signature)
         - self._flags_components: CLI flags for signature
         """
         cfg = self.cfg
 
         # --- retrieve QC metadata from align stage ---
         meta = self.upstreams["align"].metadata
-        # prefer new key, fallback for old markers
         self._n_input_reads = meta.get("n_input_reads", meta.get("n_total_reads"))
         if "n_input_reads" not in meta:
             warnings.warn(
@@ -47,72 +45,40 @@ class CorrectStage(StageBase):
                 UserWarning
             )
         if self._n_input_reads is None:
-            # bail out if no metadata present
             raise RuntimeError(
-                "align stage metadata lacks n_input_reads; "
-                "delete the old signature folder and rerun align."
+                "align stage metadata lacks n_input_reads; delete the old signature and rerun align."
             )
 
-        # --- locate files produced by align in its stage directory ---
-        align_pb: PathBuilder = self.upstreams["align"]
+        # --- locate files produced by align ---
+        align_pb = self.upstreams["align"]
         align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
         if not align_bed.exists():
             warnings.warn(
                 f"Expected align output BED not found: {align_bed}",
                 UserWarning
             )
-        # reuse align signature so signature reflects upstream outputs
         align_sig = align_pb.signature
 
-        # --- resolve genome reference path from config ---
-        root = cfg.run.input_root
-        data_dir = cfg.run.data_dir
-        genome = (Path(root) / data_dir / cfg.run.genome_fa).resolve()
+        # --- resolve genome reference path ---
+        root = Path(cfg.run.input_root)
+        data_dir = Path(cfg.run.data_dir)
+        genome = resolve_path(cfg.run.genome_fa, root=root, data_dir=data_dir)
         if not genome.exists():
             warnings.warn(
                 f"Genome FASTA not found: {genome}",
                 UserWarning
             )
 
-        # --- inputs contributing to this stage's signature ---
+        # --- inputs for signature ---
         self._hash_inputs = [align_bed, genome]
 
-        # --- parse flags for this stage from the TOML config ---
-        flags_cfg = cfg.run.stages[1].flags  # second [[run.stages]] block
-        flag_parts: list[str] = []
+        # --- parse flags for this stage ---
+        raw_flags = cfg.run.stages[1].flags
+        flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
+        self._hash_inputs.extend(extra_inputs)
 
-        def _add_flag(k: str, v: str | int | None = None):
-            # always prefix keys with '--'
-            flag_parts.append(f"--{k}")
-            if v not in (None, ""):
-                flag_parts.append(str(v))
-
-        # iterate all key/value pairs in the config block
-        for k, v in vars(flags_cfg).items():
-            if v in (None, "", True):
-                # switch flag with no argument
-                _add_flag(k)
-            elif v is False:
-                # user disabled this flag explicitly
-                continue
-            elif isinstance(v, (int, float)):
-                # numeric flag: add key and value
-                _add_flag(k, v)
-            else:
-                # treat value as a relative path under root/data_dir
-                fp = (Path(root) / data_dir / v).resolve()
-                _add_flag(k, fp)
-                if fp.exists():
-                    self._hash_inputs.append(fp)
-                else:
-                    warnings.warn(
-                        f"Flag file {fp} does not exist; skipping it in signature.",
-                        UserWarning
-                    )
-
-        # include the align signature in this stage's signature
+        # --- include upstream signature in signature inputs ---
         self._hash_inputs.append(align_sig)
-        # store flags for signature computation
         self._flags_components = flag_parts
 
         # --- warn if no extra flags were supplied ---
@@ -122,17 +88,16 @@ class CorrectStage(StageBase):
                 UserWarning
             )
 
-        # --- construct final command to execute ---
+        # --- construct final command ---
         env = cfg.run.conda_env
         return [
             "conda", "run", "-n", env,
             "flair", "correct",
-            "-q", str(align_bed),       # input BED from align
-            "-o", self.run_id,          # prefix for output files
-            *flag_parts,                 # include parsed flags
+            "-q", str(align_bed),
+            "-o", self.run_id,
+            *flag_parts,
         ]
 
-    # ------------------------------------------------------------------ #
     def expected_outputs(self) -> dict[str, Path]:
         """
         Define the output files produced by this stage:
@@ -149,6 +114,4 @@ class CorrectStage(StageBase):
         # no-op here; QC for correct lives in qc/correct_qc.py
         return {}
 
-# Placeholder: additional stages can be added below
-# e.g., class CollapseStage(StageBase): ...
 

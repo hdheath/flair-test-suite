@@ -17,7 +17,7 @@ from .config_loader import load_config
 from .stages import STAGE_REGISTRY
 
 # utility functions and classes for path building and DAG sorting
-from .core import (
+from .lib import (
     PathBuilder,
     topological_sort,
 )
