@@ -23,6 +23,7 @@ from .lib import (
 )
 
 from typing import Dict, Iterator
+import logging
 
 
 def _iter_config_paths(tsv_path: Path) -> Iterator[Path]:
@@ -62,40 +63,60 @@ def main(config_input: Path):
     else:
         inputs = iter([config_input])
 
-    any_ran = False  # track if at least one config succeeded
+    # Set up temporary logging to terminal only
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler()]
+    )
+
+    any_ran = False
+    seen_run_ids = set()  # Track run_ids for this invocation
 
     for cfg_path in inputs:
         if not cfg_path.exists():
             warnings.warn(f"Config file not found: {cfg_path}", UserWarning)
             continue
 
-        print(f"[INFO] Loading config: {cfg_path}")
+        logging.info(f"Loading config: {cfg_path}")
+
         try:
             cfg = load_config(cfg_path)
-        except Exception as e:  # misformatted TOML, etc.
+        except Exception as e:
             warnings.warn(f"Failed to load {cfg_path}: {e}", UserWarning)
             continue
 
-        # Determine run identifier: prefer cfg.run_id if set, else cfg.run.run_id
         run_id = getattr(cfg, "run_id", None) or getattr(cfg.run, "run_id", None)
-        if not run_id:
-            warnings.warn(
-                f"Skipping {cfg_path} – run_id must be set in the TOML file.",
-                UserWarning,
-            )
-            continue
-
         work_dir = Path(cfg.run.work_dir)
+        log_path = work_dir / run_id / "run_summary.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Decide log mode: overwrite if first time in this invocation, append otherwise
+        mode = "w" if run_id not in seen_run_ids else "a"
+        seen_run_ids.add(run_id)
+
+        # Reconfigure logging for this run_id
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(message)s",
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler(log_path, mode=mode)
+            ]
+        )
+
         # Topologically sort stages for this config
         stage_order = topological_sort(cfg.run.stages)
 
         upstreams: Dict[str, PathBuilder] = {}
-        print(f"[INFO] Executing run '{run_id}' with {len(stage_order)} stage(s)")
+        logging.info(f"Executing run '{run_id}' with {len(stage_order)} stage(s)")
         for st_cfg in stage_order:
             StageCls = STAGE_REGISTRY[st_cfg.name]
             pb = StageCls(cfg, run_id, work_dir, upstreams).run()
             upstreams[st_cfg.name] = pb
-            print(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
+            logging.info(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
         any_ran = True
 
     if not any_ran:
