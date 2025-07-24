@@ -112,17 +112,37 @@ def main(config_input: Path):
 
         upstreams: Dict[str, PathBuilder] = {}
         logging.info(f"Executing run '{run_id}' with {len(stage_order)} stage(s)")
+        all_skipped = True
+
         for st_cfg in stage_order:
             StageCls = STAGE_REGISTRY[st_cfg.name]
-            pb = StageCls(cfg, run_id, work_dir, upstreams).run()
-            upstreams[st_cfg.name] = pb
-            logging.info(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
-        any_ran = True
+            stage_instance = StageCls(cfg, run_id, work_dir, upstreams)
+            stage_instance.build_cmd()
+            try:
+                pb = stage_instance.run()
+            except Exception as e:
+                logging.error(f"Stage {st_cfg.name} failed: {e}")
+                break
+            else:
+                upstreams[st_cfg.name] = pb
+                logging.info(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
 
-    if not any_ran:
-        raise click.UsageError(
-            "No valid configuration files were executed. Check the input paths."
-        )
+                # Mark whether anything actually executed
+                if getattr(stage_instance, "action", None) != "skip":
+                    all_skipped = False
+                    any_executed = True
+
+        if not all_skipped:
+            all_configs_skipped = False  # <-- Add this after each config
+
+    # After the loop, update this block:
+    if seen_run_ids and all_configs_skipped:
+        logging.info("All configurations are up to date; nothing to do.")
+        sys.exit(0)
+    elif not seen_run_ids:
+        raise click.UsageError("No valid configuration files were executed. Check the input paths.")
+    elif any_executed:
+        logging.info("All stages completed successfully.")
 
 
 if __name__ == "__main__":  # pragma: no cover

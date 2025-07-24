@@ -1,14 +1,6 @@
-# src/flair_test_suite/stages/slice.py
-# -------------------------------------------------
-# Combined-output slicer (v3) – robust region containment
-#   • Emits one combined BAM, BED, GTF, and any optional extras
-#     for all specified regions.
-#   • Writes slice_region_details.tsv (chrom, start, end, span_bp).
-#   • Optional .bed and .tab files parsed with correct coords.
-
 from __future__ import annotations
 from pathlib import Path
-import csv, subprocess, warnings, shlex
+import csv, subprocess, warnings
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
@@ -17,17 +9,16 @@ from ..lib import PathBuilder
 from ..lib.input_hash import hash_many
 from ..lib.signature import write_marker
 from ..lib.reinstate import Reinstate
-from .stage_utils import resolve_path
-from ..qc import QC_REGISTRY
 from .stage_utils import resolve_path, filter_file_by_regions
+from ..qc import QC_REGISTRY
+from ..lib.signature import compute_signature
 
 __all__ = ["SliceStage"]
 
-Region = Tuple[str, int, int]  # chrom, start, end (1-based inclusive)
+Region = Tuple[str, int, int]  # chrom, start, end
 
 
 def _read_regions(tsv: Path) -> List[Region]:
-    """Parse TSV → List[(chrom,start,end)]."""
     regions: List[Region] = []
     for ln, raw in enumerate(tsv.read_text().splitlines(), 1):
         line = raw.strip()
@@ -43,7 +34,7 @@ def _read_regions(tsv: Path) -> List[Region]:
         except ValueError:
             warnings.warn(f"regions TSV line {ln}: non-integer coords", UserWarning)
             continue
-        if s > e:  # swap
+        if s > e:
             s, e = e, s
         regions.append((chrom, s, e))
     if not regions:
@@ -52,7 +43,6 @@ def _read_regions(tsv: Path) -> List[Region]:
 
 
 class IntervalLookup:
-    """Efficient full-containment lookup by chromosome."""
     def __init__(self, regions: List[Region]):
         idx: Dict[str, List[Tuple[int,int]]] = defaultdict(list)
         for c, s, e in regions:
@@ -62,7 +52,6 @@ class IntervalLookup:
         self.idx = idx
 
     def contains(self, chrom: str, start: int, end: int) -> bool:
-        """Return True if [start,end] fully within any region on chrom."""
         if chrom not in self.idx:
             return False
         for s, e in self.idx[chrom]:
@@ -74,7 +63,7 @@ class IntervalLookup:
 
 
 class SliceStage(StageBase):
-    """Stage: combine region slices into unified outputs."""
+    """Stage: combine region slices into unified outputs (BAM/BED/GTF/FASTA)."""
     name = "slice"
     requires = ("align",)
     primary_output_key = "combined_bam"
@@ -84,14 +73,12 @@ class SliceStage(StageBase):
         root = Path(cfg.run.input_root)
         data_dir = Path(cfg.run.data_dir)
 
-        # upstream align outputs
         align_pb = self.upstreams["align"]
         self._align_bam = align_pb.stage_dir / f"{self.run_id}_flair.bam"
         self._align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
 
         flags = next(st.flags for st in cfg.run.stages if st.name == "slice")
 
-        # select BED file
         if getattr(flags, "bed", None):
             self._bed_file = resolve_path(flags.bed, root=root, data_dir=data_dir)
         elif "correct" in self.upstreams:
@@ -100,18 +87,15 @@ class SliceStage(StageBase):
         else:
             self._bed_file = self._align_bed
 
-        # mandatory GTF + regions tsv
         self._gtf_path = resolve_path(flags.gtf, root=root, data_dir=data_dir)
         regions_tsv    = resolve_path(flags.regions_tsv, root=root, data_dir=data_dir)
         if not regions_tsv.exists():
             raise RuntimeError(f"regions_tsv not found: {regions_tsv}")
 
-        # parse regions
         self._regions   = _read_regions(regions_tsv)
         self._intervals = [f"{c}:{s}-{e}" for c, s, e in self._regions]
         self._lookup    = IntervalLookup(self._regions)
 
-        # optional extras
         opt_keys = [
             "junctions",
             "experiment_5_prime_regions_bed_file",
@@ -123,22 +107,23 @@ class SliceStage(StageBase):
         for k in opt_keys:
             v = getattr(flags, k, None)
             if v:
-                p = resolve_path(v, root=root, data_dir=data_dir)
-                self._optional[k] = p
+                self._optional[k] = resolve_path(v, root=root, data_dir=data_dir)
 
-        # hash inputs
+        # hash inputs (no raw FASTA needed)
         self._hash_inputs = [
             self._align_bam, self._bed_file, self._gtf_path,
             regions_tsv, align_pb.signature,
-        ] + list(self._optional.values())
+            *self._optional.values(),
+        ]
         return []
 
-    def expected_outputs(self) -> Dict[str, Path]:
+    def expected_outputs(self) -> dict[str, Path]:
         return {
             "combined_bam":  Path("combined_region.bam"),
             "combined_bai":  Path("combined_region.bam.bai"),
             "combined_bed":  Path("combined_region.bed"),
             "combined_gtf":  Path("combined_region.gtf"),
+            "combined_fa":   Path("combined_region.fa"),
             "slice_region_details": Path("slice_region_details.tsv"),
         }
 
@@ -151,7 +136,7 @@ class SliceStage(StageBase):
         d   = pb.stage_dir
         d.mkdir(parents=True, exist_ok=True)
 
-        # BAM
+        # BAM slice
         bam_out = d / "combined_region.bam"
         if Reinstate.decide(d, bam_out, needs_qc=False, stage_name=self.name) == "skip":
             return pb
@@ -165,6 +150,16 @@ class SliceStage(StageBase):
             if p_view.stdout: p_view.stdout.close()
             p_view.wait()
         subprocess.run(["samtools","index",str(bam_out)], check=True)
+
+        # FASTA from sliced BAM
+        fasta_out = d / "combined_region.fa"
+        with open(fasta_out, "w") as fa:
+            subprocess.run(
+                ["samtools", "fasta", str(bam_out)],
+                stdout=fa,
+                stderr=subprocess.DEVNULL,
+                check=True
+            )
 
         # BED
         bed_out = d / "combined_region.bed"
@@ -182,9 +177,8 @@ class SliceStage(StageBase):
 
         # optional extras
         for k, pth in self._optional.items():
-            out = d / f"combined_region.{k.replace('_','.')}"
+            out = d / f"combined_region.{k.replace('_','.') }"
             if pth.exists():
-                # Determine filetype from suffix
                 suf = pth.suffix.lower()
                 if suf == ".bed":
                     filter_file_by_regions(pth, out, self._lookup, "bed")
@@ -227,4 +221,3 @@ class SliceStage(StageBase):
         self._input_hashes = hash_many(self._hash_inputs)
         self._flags_str = "combined-slice"
         return self._run()
-

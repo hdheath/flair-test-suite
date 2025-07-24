@@ -14,6 +14,8 @@ from .stage_utils import (
     resolve_path,
     parse_cli_flags,
 )
+from ..lib.input_hash import hash_many
+from ..lib.signature import compute_signature
 
 class CorrectStage(StageBase):
     """
@@ -73,7 +75,7 @@ class CorrectStage(StageBase):
         self._hash_inputs = [align_bed, genome]
 
         # --- parse flags for this stage ---
-        raw_flags = cfg.run.stages[1].flags
+        raw_flags = next(st.flags for st in cfg.run.stages if st.name == "correct")
         flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
         self._hash_inputs.extend(extra_inputs)
 
@@ -124,5 +126,6 @@ class CorrectStage(StageBase):
     def collect_qc(self, pb):
         # no-op here; QC for correct lives in qc/correct_qc.py
         return {}
+
 
 

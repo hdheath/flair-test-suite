@@ -12,6 +12,7 @@ from pathlib import Path # for filesystem paths
 
 from .base import StageBase       # base class providing orchestration logic
 from ..lib.input_hash import hash_many  # to hash input files
+from ..lib.signature import compute_signature
 from .stage_utils import (
     count_reads,
     resolve_path,
@@ -129,4 +130,3 @@ class AlignStage(StageBase):
     # QC is invoked automatically by StageBase if a collector is registered
     def collect_qc(self, pb):
         return {}  # no-op here; actual QC logic lives in qc/align_qc.py
-

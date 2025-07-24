@@ -156,6 +156,8 @@ class StageBase(ABC):
                 f"Stage {self.name} completed but primary output missing: {primary}",
                 UserWarning
             )
+            # Add this to halt the pipeline if output is missing
+            raise RuntimeError(f"Stage {self.name} failed: missing primary output {primary}")
 
         # --- after run, collect QC if needed ---
         qc_metrics = self._run_qc(stage_dir, primary, runtime)
@@ -236,3 +238,6 @@ class StageBase(ABC):
     def input_hashes(self) -> List[str]:
         """List of file hashes used for signature calculation."""
         return getattr(self, "_input_hashes", [])
+
+    def compute_signature(self):
+        return "".join(hash_many(self._hash_inputs))
