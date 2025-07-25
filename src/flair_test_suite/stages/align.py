@@ -82,10 +82,6 @@ class AlignStage(StageBase):
                 warnings.warn("Could not run `flair --version`; using 'flair-unknown'", UserWarning)
                 self._tool_version = "flair-unknown"
 
-        # --- debug printouts to stdout for visibility ---
-        print("[DEBUG] align _hash_inputs:", self._hash_inputs)
-        print("[DEBUG] align flags       :", " ".join(flag_parts))
-
         # --- warn if no extra flags were supplied ---
         if not flag_parts:
             warnings.warn("No extra flags configured for align stage; using defaults", UserWarning)

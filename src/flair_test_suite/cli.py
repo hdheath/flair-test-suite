@@ -71,6 +71,7 @@ def main(config_input: Path):
     )
 
     any_ran = False
+    any_failed = False
     seen_run_ids = set()  # Track run_ids for this invocation
 
     for cfg_path in inputs:
@@ -122,27 +123,31 @@ def main(config_input: Path):
                 pb = stage_instance.run()
             except Exception as e:
                 logging.error(f"Stage {st_cfg.name} failed: {e}")
+                any_failed = True
                 break
             else:
                 upstreams[st_cfg.name] = pb
                 logging.info(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
-
-                # Mark whether anything actually executed
                 if getattr(stage_instance, "action", None) != "skip":
                     all_skipped = False
                     any_executed = True
-
         if not all_skipped:
-            all_configs_skipped = False  # <-- Add this after each config
+            all_configs_skipped = False
 
-    # After the loop, update this block:
+    # After the loop:
     if seen_run_ids and all_configs_skipped:
         logging.info("All configurations are up to date; nothing to do.")
         sys.exit(0)
     elif not seen_run_ids:
         raise click.UsageError("No valid configuration files were executed. Check the input paths.")
+    elif any_failed:
+        logging.error("Pipeline failed: at least one stage did not complete successfully.")
+        sys.exit(1)
     elif any_executed:
         logging.info("All stages completed successfully.")
+
+        if not all_skipped:
+            all_configs_skipped = False  # <-- Add this after each config
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -75,11 +75,6 @@ class CollapseStage(StageBase):
         raw_flags = next(st.flags for st in cfg.run.stages if st.name == "collapse")
         flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
 
-        # Auto-inject threads if not provided by user
-        threads = getattr(cfg.run, "threads", None)
-        if threads and not any(f in ("-t", "--threads") for f in flag_parts):
-            flag_parts.extend(["-t", str(threads)])
-
         # Signature inputs: query_bed, genome, upstream_sig, reads, extra files
         self._hash_inputs = [query_bed, genome, upstream_sig, *reads, *extra_inputs]
         self._flags_components = flag_parts
