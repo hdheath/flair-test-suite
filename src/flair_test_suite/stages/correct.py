@@ -65,6 +65,7 @@ class CorrectStage(StageBase):
         root = Path(cfg.run.input_root)
         data_dir = Path(cfg.run.data_dir)
         genome = resolve_path(cfg.run.genome_fa, root=root, data_dir=data_dir)
+        self._genome_fa_abs = str(genome.resolve())
         if not genome.exists():
             warnings.warn(
                 f"Genome FASTA not found: {genome}",

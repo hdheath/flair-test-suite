@@ -19,6 +19,7 @@ import tempfile
 import time
 from statistics import mean, median
 
+
 import matplotlib
 matplotlib.use("Agg")  # headless backend
 import matplotlib.pyplot as plt  # noqa: E402
@@ -31,6 +32,7 @@ from .qc_utils import (
     iter_primary,
     count_unique_junctions,
     SAMPLE_LIMIT,
+    count_splice_junction_motifs
 )
 
 __all__ = ["collect"]
@@ -41,6 +43,7 @@ def collect(
     bam: Path,
     out_dir: Path,
     n_input_reads: int,
+    genome_fa: str,  # Path to genome FASTA for motif counting
     runtime_sec: float | None = None,  # align‑stage runtime comes from StageBase
 ) -> dict:
     """QC collector for the *align* stage.
@@ -123,7 +126,23 @@ def collect(
     id_png   = _hist([round(v*100,1) for v in identity_vals], "align_identity_hist.png", "Read identity (%)")
     len_png  = _hist(read_len_vals, "align_length_hist.png", "Read length (bp)")
 
-    # ----------------------------- 6. metrics ------------------------------
+    # Count splice junction motifs (4-mers)
+    try:
+        motif_counts = count_splice_junction_motifs(
+            bed_path=bed,
+            fasta_path=Path(genome_fa), 
+            max_workers=4  # or get from config/env
+        )
+    except Exception as e:
+        motif_counts = {}
+        print(f"Warning: Splice junction motif counting failed: {e}")
+
+    # Save motif counts as a separate JSON file
+    motif_counts_str = {f"{k[0]}:{k[1]}": v for k, v in motif_counts.items()}
+    with open(Path(out_dir) / "splice_site_motifs.json", "w") as fh:
+        json.dump(motif_counts_str, fh, indent=2)
+
+    # Save metrics (without motif counts, or keep as summary)
     metrics = {
         "n_input_reads":   n_input_reads,
         "n_retained_bed":  retained,
@@ -133,12 +152,10 @@ def collect(
         "n_softclip":      softclip_n,
         "softclip_pct":    softclip_pct,
         "unique_junctions": unique_juncs,
-        # runtimes
         "align_runtime_sec":   round(runtime_sec, 2) if runtime_sec else None,
         "qc_runtime_sec":      round(time.time() - qc_start, 2),
     }
 
-    # ----------------------------- 7. persist ------------------------------
     write_metrics(out_dir, "align", metrics)
     with open(Path(out_dir) / "align_plot_manifest.json", "w") as fh:
         json.dump({"mapq": mapq_png, "identity": id_png, "length": len_png}, fh, indent=2)

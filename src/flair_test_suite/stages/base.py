@@ -190,14 +190,23 @@ class StageBase(ABC):
         if not qc_func or not primary.exists():
             return {}
         try:
+            genome_fa = getattr(self, "_genome_fa_abs", None)
             if self.name == "correct":
-                # Pass align signature for correct QC
                 align_sig = self.upstreams["align"].signature if "align" in self.upstreams else None
                 return qc_func(
                     primary,
                     out_dir=stage_dir,
                     n_input_reads=getattr(self, "_n_input_reads", None),
                     align_sig=align_sig,
+                    genome_fa=genome_fa,  # <-- add this line
+                    runtime_sec=runtime,
+                )
+            elif self.name == "align":
+                return qc_func(
+                    primary,
+                    out_dir=stage_dir,
+                    n_input_reads=getattr(self, "_n_input_reads", None),
+                    genome_fa=genome_fa,  # <-- add this line
                     runtime_sec=runtime,
                 )
             else:

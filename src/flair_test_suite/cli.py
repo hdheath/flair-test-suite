@@ -72,6 +72,7 @@ def main(config_input: Path):
 
     any_ran = False
     any_failed = False
+    all_configs_skipped = False 
     seen_run_ids = set()  # Track run_ids for this invocation
 
     for cfg_path in inputs:

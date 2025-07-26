@@ -47,6 +47,8 @@ class AlignStage(StageBase):
         reads = resolve_path(reads_file, root=root, data_dir=data_dir)
         genome = resolve_path(genome_fa, root=root, data_dir=data_dir)
 
+        self._genome_fa_abs = str(genome.resolve())
+
         # --- warn on missing or empty inputs ---
         if not reads.exists():
             warnings.warn(f"Reads file not found: {reads}", UserWarning)

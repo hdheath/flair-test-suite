@@ -10,7 +10,8 @@ from pathlib import Path
 import time
 
 from . import register, write_metrics, qc_sidecar_path
-from .qc_utils import count_lines, percent, count_unique_junctions
+from .qc_utils import count_lines, percent, count_unique_junctions, count_splice_junction_motifs
+import json
 
 __all__ = ["collect"]
 
@@ -21,6 +22,7 @@ def collect(
     out_dir: Path,
     n_input_reads: int,
     align_sig: str,
+    genome_fa: str,  # Path to genome FASTA for motif counting
     runtime_sec: float | None = None,
 ) -> dict:
     """QC collector for the correct stage.
@@ -34,6 +36,7 @@ def collect(
       • qc_runtime_sec (time to compute these QC metrics)
     """
     qc_start = time.time()
+    print(f"[DEBUG] correct_qc.collect genome_fa: {genome_fa}")
 
     # reads retained / removed
     n_corrected = count_lines(bed)
@@ -62,7 +65,48 @@ def collect(
         print("Error reading align QC:", e)
         pass
 
-    # assemble QC metrics
+    # Load motif counts before correction
+    motif_counts_before = {}
+    motif_json = align_stage_dir / "splice_site_motifs.json"
+    try:
+        if motif_json.exists():
+            with open(motif_json) as fh:
+                motif_counts_before = json.load(fh)
+    except Exception as e:
+        print("Error reading align motif counts JSON:", e)
+        pass
+
+    # Count motifs after correction
+    try:
+        motif_counts_after = count_splice_junction_motifs(
+            bed_path=bed,
+            fasta_path=Path(genome_fa),
+            max_workers=4
+        )
+    except Exception as e:
+        motif_counts_after = {}
+        print(f"Warning: Splice motif counting (after) failed: {e}")
+
+    # Compute diff and convert keys to strings
+    motif_counts_after_str = {f"{k[0]}:{k[1]}" if isinstance(k, tuple) else str(k): v for k, v in motif_counts_after.items()}
+    motif_counts_before_str = {f"{k[0]}:{k[1]}" if isinstance(k, tuple) else str(k): v for k, v in motif_counts_before.items()}
+    motif_diff = {}
+    for k in set(motif_counts_after_str) | set(motif_counts_before_str):
+        motif_diff[k] = motif_counts_after_str.get(k, 0) - motif_counts_before_str.get(k, 0)
+    motif_diff_str = {str(k): v for k, v in motif_diff.items()}
+
+    # Save both before and after motif counts (and diff) to JSON
+    motif_json_out = Path(out_dir) / "correct_splice_site_motifs.json"
+    motif_json_data = {
+        "after": motif_counts_after_str,
+        "before": motif_counts_before_str,
+        "diff": motif_diff_str,
+    }
+    with open(motif_json_out, "w") as fh:
+        json.dump(motif_json_data, fh, indent=2)
+    print(f"[DEBUG] Saved motifs before/after/diff to {motif_json_out}")
+
+    # assemble QC metrics (motif counts NOT included)
     metrics = {
         "n_input_reads":      n_input_reads,
         "n_corrected_reads":  n_corrected,
@@ -76,5 +120,4 @@ def collect(
 
     write_metrics(out_dir, "correct", metrics)
     return metrics
-
 
