@@ -10,6 +10,7 @@ from pathlib import Path  # for filesystem paths
 import csv    # to write TSV metrics files
 import json   # to read existing marker JSON files
 import time   # optional timing utilities, not currently used directly
+from ..lib.signature import qc_sidecar_path, load_marker
 
 # ---------------------------------------------------------------------
 # 1) Public API -------------------------------------------------------
@@ -33,12 +34,6 @@ def register(stage_name: str):
     return _wrap
 
 
-def qc_sidecar_path(stage_dir: Path, stage_name: str) -> Path:
-    """
-    Construct the path to the <stage_name>_qc.tsv side‑car file inside stage_dir.
-    """
-    return stage_dir / f"{stage_name}_qc.tsv"
-
 
 def write_metrics(stage_dir: Path, stage_name: str, metrics: dict):
     """
@@ -57,15 +52,6 @@ def write_metrics(stage_dir: Path, stage_name: str, metrics: dict):
         w.writerow(["metric", "value"])
         for k, v in metrics.items():
             w.writerow([k, v])
-
-
-def load_marker(marker_f: Path) -> dict:
-    """
-    Read and parse the JSON completion marker file at marker_f.
-    Returns the full metadata dict, including any "qc" block.
-    """
-    with open(marker_f) as fh:
-        return json.load(fh)
 
 # ---------------------------------------------------------------------
 # 2) Auto‑import plug‑ins ---------------------------------------------

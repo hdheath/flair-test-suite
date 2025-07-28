@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import time
 from statistics import mean, median
+from ..lib.signature import qc_sidecar_path, load_marker
 
 
 import matplotlib

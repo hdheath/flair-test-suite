@@ -13,9 +13,9 @@ from .base import StageBase           # base class providing run() and QC logic
 from .stage_utils import (
     resolve_path,
     parse_cli_flags,
+    get_stage_config
 )
 from ..lib.input_hash import hash_many
-from ..lib.signature import compute_signature
 
 class CorrectStage(StageBase):
     """
@@ -29,13 +29,6 @@ class CorrectStage(StageBase):
     primary_output_key = "corrected"
 
     def build_cmd(self) -> list[str]:
-        """
-        Assemble the command to run `flair correct`.
-        Also prepares:
-        - self._n_input_reads: from align metadata for QC
-        - self._hash_inputs: inputs affecting signature (BED + genome + any extra flag files + upstream signature)
-        - self._flags_components: CLI flags for signature
-        """
         cfg = self.cfg
 
         # --- retrieve QC metadata from align stage ---
@@ -62,22 +55,20 @@ class CorrectStage(StageBase):
         align_sig = align_pb.signature
 
         # --- resolve genome reference path ---
-        root = Path(cfg.run.input_root)
-        data_dir = Path(cfg.run.data_dir)
-        genome = resolve_path(cfg.run.genome_fa, root=root, data_dir=data_dir)
-        self._genome_fa_abs = str(genome.resolve())
-        if not genome.exists():
-            warnings.warn(
-                f"Genome FASTA not found: {genome}",
-                UserWarning
-            )
+        raw_reads = getattr(cfg, "reads_file", None) or cfg.run.reads_file
+        resolved = self.resolve_stage_inputs({
+            "genome": cfg.run.genome_fa,
+            "reads": raw_reads,
+        })
+        genome = resolved["genome"]
+        reads = resolved["reads"]
+        self._genome_fa_abs = str(genome)  # <-- Ensure this is set for QC
 
         # --- inputs for signature ---
         self._hash_inputs = [align_bed, genome]
 
         # --- parse flags for this stage ---
-        raw_flags = next(st.flags for st in cfg.run.stages if st.name == "correct")
-        flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
+        flag_parts, extra_inputs = self.resolve_stage_flags()
         self._hash_inputs.extend(extra_inputs)
 
         # --- include upstream signature in signature inputs ---
@@ -93,11 +84,9 @@ class CorrectStage(StageBase):
 
         # --- construct final command ---
         env = cfg.run.conda_env
-
-        # Parse major version
         flair_version = str(cfg.run.version)
         major_version = int(flair_version.split(".")[0])
-    
+
         cmd = [
             "conda", "run", "-n", env,
             "flair", "correct",
@@ -105,8 +94,6 @@ class CorrectStage(StageBase):
             "-o", self.run_id,
             *flag_parts,
         ]
-
-        # Only add genome argument for FLAIR < 3
         if major_version < 3:
             cmd.extend(["-g", str(genome)])
 

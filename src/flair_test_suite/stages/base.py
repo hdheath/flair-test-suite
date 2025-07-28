@@ -31,7 +31,9 @@ from ..lib.reinstate  import Reinstate
 # QC_REGISTRY: maps stage names to collector functions
 # qc_sidecar_path: constructs path to <stage>_qc.tsv
 # load_marker: read existing marker JSON
-from ..qc import QC_REGISTRY, qc_sidecar_path, load_marker
+from ..lib.signature import qc_sidecar_path, load_marker
+from ..qc import QC_REGISTRY
+from .stage_utils import get_stage_config, parse_cli_flags
 
 
 class StageBase(ABC):
@@ -73,6 +75,42 @@ class StageBase(ABC):
     def build_cmd(self) -> List[str] | str:
         """Build and return the command to run this stage"""
         ...
+
+    def resolve_stage_inputs(self, inputs: dict[str, str | Path]) -> dict[str, Path]:
+        """
+        Resolve input paths for the stage, warn if missing, and return resolved Paths.
+        Usage:
+            resolved = self.resolve_stage_inputs({
+                "genome": self.cfg.run.genome_fa,
+                "reads": self.cfg.run.reads_file,
+            })
+            genome = resolved["genome"]
+            reads = resolved["reads"]
+        """
+        root = Path(self.cfg.run.input_root)
+        data_dir = Path(self.cfg.run.data_dir)
+        from .stage_utils import resolve_path
+        resolved = {}
+        for key, raw in inputs.items():
+            p = resolve_path(raw, root=root, data_dir=data_dir)
+            resolved[key] = p
+            if not p.exists():
+                warnings.warn(f"[{self.name}] Input file missing: {key} -> {p}", UserWarning)
+        return resolved
+
+    def resolve_stage_flags(self, raw_flags=None) -> tuple[list[str], list[Path]]:
+        """
+        Parse CLI flags for the stage, resolving file paths and injecting threads if needed.
+        Returns (flag_parts, extra_inputs).
+        """
+        cfg = self.cfg
+        root = Path(cfg.run.input_root)
+        data_dir = Path(cfg.run.data_dir)
+        if raw_flags is None:
+            stage_cfg = get_stage_config(cfg, self.name)
+            raw_flags = getattr(stage_cfg, "flags", {}) or {}
+        flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
+        return flag_parts, extra_inputs
 
     @abstractmethod
     def expected_outputs(self) -> Dict[str, Path]:
@@ -121,10 +159,12 @@ class StageBase(ABC):
         # --- skip case: tool already ran & QC exists ---
         if action == "skip":
             print(f"[SKIP] {self.name} complete (sig={sig})")
-            marker_f = stage_dir / ".completed.json"
             try:
-                full_meta = load_marker(marker_f)
-                pb.metadata = full_meta.get("qc", {})
+                full_meta = load_marker(stage_dir)  # <-- pass the directory, not the file!
+                if not isinstance(full_meta, dict):
+                    pb.metadata = {}
+                else:
+                    pb.metadata = full_meta
             except FileNotFoundError:
                 pb.metadata = {}
             return pb
@@ -247,6 +287,3 @@ class StageBase(ABC):
     def input_hashes(self) -> List[str]:
         """List of file hashes used for signature calculation."""
         return getattr(self, "_input_hashes", [])
-
-    def compute_signature(self):
-        return "".join(hash_many(self._hash_inputs))

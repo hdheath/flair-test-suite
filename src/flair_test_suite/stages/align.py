@@ -12,11 +12,13 @@ from pathlib import Path # for filesystem paths
 
 from .base import StageBase       # base class providing orchestration logic
 from ..lib.input_hash import hash_many  # to hash input files
-from ..lib.signature import compute_signature
+
+
 from .stage_utils import (
     count_reads,
     resolve_path,
     parse_cli_flags,
+    get_stage_config
 )
 
 class AlignStage(StageBase):
@@ -27,35 +29,17 @@ class AlignStage(StageBase):
     name = "align"
 
     def build_cmd(self) -> list[str]:
-        """
-        Construct the command to invoke `flair align` using shared helpers.
-        Prepares:
-        - self._n_input_reads: for QC collector
-        - self._hash_inputs: list of Paths whose contents/signature matter
-        - self._flags_components: list of CLI flags for signature
-        """
         cfg = self.cfg
 
-        # --- resolve input paths, allowing overrides at top-level or under run ---
-        root = Path(getattr(cfg, "input_root", None) or cfg.run.input_root)
-        data_dir = Path(getattr(cfg, "data_dir", None) or cfg.run.data_dir)
-
-        reads_file = getattr(cfg, "reads_file", None) or cfg.run.reads_file
-        genome_fa = getattr(cfg, "genome_fa", None) or cfg.run.genome_fa
-
-        # Absolute paths using shared resolve_path
-        reads = resolve_path(reads_file, root=root, data_dir=data_dir)
-        genome = resolve_path(genome_fa, root=root, data_dir=data_dir)
-
-        self._genome_fa_abs = str(genome.resolve())
-
-        # --- warn on missing or empty inputs ---
-        if not reads.exists():
-            warnings.warn(f"Reads file not found: {reads}", UserWarning)
-        elif reads.stat().st_size == 0:
-            warnings.warn(f"Reads file is empty: {reads}", UserWarning)
-        if not genome.exists():
-            warnings.warn(f"Genome FASTA not found: {genome}", UserWarning)
+        # --- resolve input paths ---
+        raw_reads = getattr(cfg, "reads_file", None) or cfg.run.reads_file
+        resolved = self.resolve_stage_inputs({
+            "genome": cfg.run.genome_fa,
+            "reads": raw_reads,
+        })
+        genome = resolved["genome"]
+        reads = resolved["reads"]
+        self._genome_fa_abs = str(genome)
 
         # --- count reads for QC and warn if zero ---
         self._n_input_reads = count_reads(reads)
@@ -65,10 +49,8 @@ class AlignStage(StageBase):
         # --- inputs that affect the signature ---
         self._hash_inputs = [reads, genome]
 
-        # --- parse flags from the config for this stage ---
-        raw_flags = cfg.run.stages[0].flags
-        flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
-        # include any additional files flagged for signature
+        # --- parse flags and extra inputs using StageBase helper ---
+        flag_parts, extra_inputs = self.resolve_stage_flags()
         self._hash_inputs.extend(extra_inputs)
         self._flags_components = flag_parts
 
@@ -124,7 +106,7 @@ class AlignStage(StageBase):
             "bam": Path(f"{base}.bam"),
             "bed": Path(f"{base}.bed"),
         }
-
+        
     # QC is invoked automatically by StageBase if a collector is registered
     def collect_qc(self, pb):
         return {}  # no-op here; actual QC logic lives in qc/align_qc.py

@@ -6,7 +6,7 @@ import warnings
 from pathlib import Path
 
 from .base import StageBase
-from .stage_utils import resolve_path, parse_cli_flags
+from .stage_utils import resolve_path, parse_cli_flags, get_stage_config
 
 
 class TranscriptomeStage(StageBase):
@@ -57,24 +57,18 @@ class TranscriptomeStage(StageBase):
 
         bam_path, upstream_sig = self._locate_bam()
 
-        # Genome
-        root = Path(cfg.run.input_root)
-        data_dir = Path(cfg.run.data_dir)
-        genome = resolve_path(cfg.run.genome_fa, root=root, data_dir=data_dir)
-        if not genome.exists():
-            warnings.warn(f"Genome FASTA not found: {genome}", UserWarning)
+        # --- resolve genome and reads ---
+        raw_reads = getattr(cfg, "reads_file", None) or cfg.run.reads_file
+        resolved = self.resolve_stage_inputs({
+            "genome": cfg.run.genome_fa,
+            "reads": raw_reads,
+        })
+        genome = resolved["genome"]
+        reads = resolved["reads"]
+        self._genome_fa_abs = str(genome)  # For QC
 
-        # Parse user flags (gtf, junction_tab, etc.)
-        flags = next((st.flags for st in self.cfg.run.stages if st.name == self.name), None)
-        raw_flags = flags or {}
-        flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
-
-        # Inject threads if missing
-        threads = getattr(cfg.run, "threads", None)
-        if threads and not any(f in ("-t", "--threads") for f in flag_parts):
-            flag_parts.extend(["-t", str(threads)])
-
-        # Signature inputs
+        # --- parse flags and extra inputs ---
+        flag_parts, extra_inputs = self.resolve_stage_flags()
         self._hash_inputs = [bam_path, genome, upstream_sig, *extra_inputs]
         self._flags_components = flag_parts
 

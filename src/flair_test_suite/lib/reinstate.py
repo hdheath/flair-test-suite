@@ -6,8 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Literal
-
-from ..qc import qc_sidecar_path, load_marker
+from .signature import qc_sidecar_path, load_marker
 
 # The three actions our state machine can return
 Action = Literal["skip", "qc", "run"]

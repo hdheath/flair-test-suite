@@ -121,3 +121,13 @@ def filter_file_by_regions(src: Path, out: Path, lookup, filetype: str):
                 kept += 1
     if kept == 0:
         warnings.warn(f"{out.name} empty after filtering", UserWarning)
+
+def get_stage_config(cfg, name):
+    """
+    Return the stage config object for the given stage name.
+    Raises KeyError if not found.
+    """
+    for st in cfg.run.stages:
+        if st.name == name:
+            return st
+    raise KeyError(f"Stage '{name}' not found in config.")

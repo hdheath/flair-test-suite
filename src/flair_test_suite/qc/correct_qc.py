@@ -9,8 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 import time
 
-from . import register, write_metrics, qc_sidecar_path
+from . import register, write_metrics
 from .qc_utils import count_lines, percent, count_unique_junctions, count_splice_junction_motifs
+from ..lib.signature import qc_sidecar_path, load_marker
 import json
 
 __all__ = ["collect"]

@@ -4,10 +4,9 @@ import warnings
 from pathlib import Path
 
 from .base import StageBase
-from .stage_utils import resolve_path, parse_cli_flags
+from .stage_utils import resolve_path, parse_cli_flags, get_stage_config
 import logging
 from ..lib.input_hash import hash_many
-from ..lib.signature import compute_signature
 
 
 class CollapseStage(StageBase):
@@ -42,40 +41,32 @@ class CollapseStage(StageBase):
         # Locate query BED, upstream signature, and branch
         query_bed, upstream_sig, branch = self._locate_query_bed()
 
-        # Resolve genome reference
-        root = Path(cfg.run.input_root)
-        data_dir = Path(cfg.run.data_dir)
-        genome = resolve_path(cfg.run.genome_fa, root=root, data_dir=data_dir)
-        if not genome.exists():
-            warnings.warn(f"Genome FASTA not found: {genome}", UserWarning)
-
-        # Determine reads based on branch
+        # --- resolve genome and reads ---
         if branch == "slice":
-            # Expect a FASTA named <prefix>.fa next to combined_region.bed
             prefix = query_bed.stem
             read_file = query_bed.parent / f"{prefix}.fa"
             if not read_file.exists():
                 raise FileNotFoundError(f"Slice branch reads not found: {read_file}")
-            reads = [read_file]
+            raw_reads = read_file
         else:
-            # correct branch: derive raw reads from config (same as align)
+            # correct branch: derive raw reads from config
             read_field = getattr(cfg.run, "reads_file", None) or getattr(cfg.run, "reads_files", None)
             if not read_field:
                 raise RuntimeError("Config missing `reads_file(s)` required for collapse in correct branch.")
-            if isinstance(read_field, (str, Path)):
-                raw_reads = [read_field]
-            else:
-                raw_reads = list(read_field)
-            reads = [resolve_path(p, root=root, data_dir=data_dir) for p in raw_reads]
-            for r in reads:
-                if not r.exists():
-                    warnings.warn(f"Read file not found: {r}", UserWarning)
+            raw_reads = read_field
 
-        # Parse additional collapse flags
-        raw_flags = next(st.flags for st in cfg.run.stages if st.name == "collapse")
-        flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
+        resolved = self.resolve_stage_inputs({
+            "genome": cfg.run.genome_fa,
+            "reads": raw_reads,
+        })
+        genome = resolved["genome"]
+        reads = resolved["reads"]
+        if isinstance(reads, (str, Path)):
+            reads = [reads]
+        self._genome_fa_abs = str(genome)  # For QC
 
-        # Signature inputs: query_bed, genome, upstream_sig, reads, extra files
+        # --- parse flags and extra inputs ---
+        flag_parts, extra_inputs = self.resolve_stage_flags()
         self._hash_inputs = [query_bed, genome, upstream_sig, *reads, *extra_inputs]
         self._flags_components = flag_parts
 
@@ -85,7 +76,7 @@ class CollapseStage(StageBase):
                 UserWarning
             )
 
-        # Build and return collapse command
+        # --- build and return collapse command ---
         env = cfg.run.conda_env
         cmd = [
             "conda", "run", "-n", env,
