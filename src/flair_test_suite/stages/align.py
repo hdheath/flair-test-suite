@@ -44,7 +44,7 @@ class AlignStage(StageBase):
         # --- count reads for QC and warn if zero ---
         self._n_input_reads = count_reads(reads)
         if self._n_input_reads == 0:
-            warnings.warn(f"No reads counted in {reads}", UserWarning)
+            logging.warning(f"No reads counted in {reads}")
 
         # --- inputs that affect the signature ---
         self._hash_inputs = [reads, genome]
@@ -63,23 +63,23 @@ class AlignStage(StageBase):
                 ).strip()
                 self._tool_version = raw.splitlines()[-1] if raw else "flair-unknown"
             except subprocess.CalledProcessError:
-                warnings.warn("Could not run `flair --version`; using 'flair-unknown'", UserWarning)
+                logging.warning("Could not run `flair --version`; using 'flair-unknown'")
                 self._tool_version = "flair-unknown"
 
         # --- warn if no extra flags were supplied ---
         if not flag_parts:
-            warnings.warn("No extra flags configured for align stage; using defaults", UserWarning)
+            logging.warning("No extra flags configured for align stage; using defaults")
 
         # --- construct and return the final command list ---
         out_prefix = f"{self.run_id}_flair"
-        return [
-            "conda", "run", "-n", cfg.run.conda_env,
+        cmd = [
             "flair", "align",
             "-g", str(genome),
             "-r", str(reads),
             "-o", out_prefix,
             *flag_parts,
         ]
+        return cmd
 
     @property
     def tool_version(self) -> str:

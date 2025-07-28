@@ -23,10 +23,6 @@ class PathBuilder:
     The `metadata` attribute (populated at runtime by StageBase) can store
     arbitrary key/value pairs, such as QC metrics, for downstream stages.
     """
-
-    # Placeholder for per-run metadata (populated dynamically):
-    metadata: dict[str, any] = {}
-
     def __init__(
         self,
         work_dir: Path,
@@ -34,14 +30,11 @@ class PathBuilder:
         stage: str,
         signature: str,
     ):
-        # Base output directory, expanded (~) and resolved to an absolute path
         self.base = Path(work_dir).expanduser().resolve()
-        # Sample identifier (used as a sub-directory)
         self.sample = sample
-        # Stage identifier (used as a sub-directory)
         self.stage = stage
-        # Unique signature (used as the final sub-directory)
         self.signature = signature
+        self.metadata: dict[str, any] = {}  # <-- instance attribute
 
     @property
     def stage_dir(self) -> Path:

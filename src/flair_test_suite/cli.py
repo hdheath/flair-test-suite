@@ -9,6 +9,7 @@ import click   # CLI framework
 import sys     # for sys.exit()
 import warnings
 from pathlib import Path  # for path manipulations
+import logging
 
 # load configuration from a TOML file
 from .config_loader import load_config
@@ -23,8 +24,7 @@ from .lib import (
 )
 
 from typing import Dict, Iterator
-import logging
-
+from .lib.logging import setup_run_logging  # <-- centralized logging
 
 def _iter_config_paths(tsv_path: Path) -> Iterator[Path]:
     """Yield absolute Paths to config files listed in the TSV.
@@ -43,7 +43,6 @@ def _iter_config_paths(tsv_path: Path) -> Iterator[Path]:
         if not cfg_path.is_absolute():
             cfg_path = (tsv_path.parent / cfg_path).resolve()
         yield cfg_path
-
 
 @click.command()
 @click.argument("config_input", type=click.Path(exists=True, path_type=Path))
@@ -97,17 +96,8 @@ def main(config_input: Path):
         mode = "w" if run_id not in seen_run_ids else "a"
         seen_run_ids.add(run_id)
 
-        # Reconfigure logging for this run_id
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(levelname)s %(message)s",
-            handlers=[
-                logging.StreamHandler(),
-                logging.FileHandler(log_path, mode=mode)
-            ]
-        )
+        # Centralized logging setup for this run_id
+        setup_run_logging(log_path, mode)
 
         # Topologically sort stages for this config
         stage_order = topological_sort(cfg.run.stages)
@@ -131,7 +121,7 @@ def main(config_input: Path):
                 logging.info(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
                 if getattr(stage_instance, "action", None) != "skip":
                     all_skipped = False
-                    any_executed = True
+                    any_ran = True
         if not all_skipped:
             all_configs_skipped = False
 
@@ -144,14 +134,11 @@ def main(config_input: Path):
     elif any_failed:
         logging.error("Pipeline failed: at least one stage did not complete successfully.")
         sys.exit(1)
-    elif any_executed:
+    elif any_ran:
         logging.info("All stages completed successfully.")
 
         if not all_skipped:
             all_configs_skipped = False  # <-- Add this after each config
 
-
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
-
-

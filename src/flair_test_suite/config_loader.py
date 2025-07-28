@@ -1,20 +1,8 @@
-# src/flair_test_suite/config_loader.py
 import tomli
-from types import SimpleNamespace
 from pathlib import Path
+from .config_schema import Config
 
-
-def _to_ns(obj):
-    """Recursively convert dicts to SimpleNamespace, lists-of-dicts to list‑of‑NS."""
-    if isinstance(obj, dict):
-        return SimpleNamespace(**{k: _to_ns(v) for k, v in obj.items()})
-    if isinstance(obj, list):
-        return [_to_ns(v) for v in obj]
-    return obj
-
-
-def load_config(path: str | Path):
+def load_config(path: str | Path) -> Config:
     with open(path, "rb") as fh:
         data = tomli.load(fh)
-    return _to_ns(data)
-
+    return Config.parse_obj(data)

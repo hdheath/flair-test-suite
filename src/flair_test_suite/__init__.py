@@ -7,9 +7,11 @@
 __all__ = [
     "cli",
     "config_loader",
+    "config_schema"
     "util",
     "stages",
     "qc",
+    "lib"
 ]
 
 

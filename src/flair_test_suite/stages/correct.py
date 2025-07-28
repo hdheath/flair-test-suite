@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-import warnings          # to emit runtime warnings
+import logging
 from pathlib import Path  # for filesystem path operations
 
 from .base import StageBase           # base class providing run() and QC logic
@@ -35,9 +35,8 @@ class CorrectStage(StageBase):
         meta = self.upstreams["align"].metadata
         self._n_input_reads = meta.get("n_input_reads", meta.get("n_total_reads"))
         if "n_input_reads" not in meta:
-            warnings.warn(
-                "Using legacy metadata key 'n_total_reads' for input read count; consider rerunning align to refresh metadata.",
-                UserWarning
+            logging.warning(
+                "Using legacy metadata key 'n_total_reads' for input read count; consider rerunning align to refresh metadata."
             )
         if self._n_input_reads is None:
             raise RuntimeError(
@@ -48,9 +47,8 @@ class CorrectStage(StageBase):
         align_pb = self.upstreams["align"]
         align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
         if not align_bed.exists():
-            warnings.warn(
-                f"Expected align output BED not found: {align_bed}",
-                UserWarning
+            logging.warning(
+                f"Expected align output BED not found: {align_bed}"
             )
         align_sig = align_pb.signature
 
@@ -77,18 +75,15 @@ class CorrectStage(StageBase):
 
         # --- warn if no extra flags were supplied ---
         if not flag_parts:
-            warnings.warn(
-                "No extra flags configured for correct stage; using defaults.",
-                UserWarning
+            logging.warning(
+                "No extra flags configured for correct stage; using defaults."
             )
 
         # --- construct final command ---
-        env = cfg.run.conda_env
         flair_version = str(cfg.run.version)
         major_version = int(flair_version.split(".")[0])
 
         cmd = [
-            "conda", "run", "-n", env,
             "flair", "correct",
             "-q", str(align_bed),
             "-o", self.run_id,

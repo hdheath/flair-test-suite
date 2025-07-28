@@ -2,7 +2,7 @@
 # --------------------------------------------
 from __future__ import annotations
 
-import warnings
+import logging
 from pathlib import Path
 
 from .base import StageBase
@@ -73,14 +73,11 @@ class TranscriptomeStage(StageBase):
         self._flags_components = flag_parts
 
         if not flag_parts:
-            warnings.warn(
-                "No extra flags configured for transcriptome stage; using defaults.",
-                UserWarning
+            logging.warning(
+                "No extra flags configured for transcriptome stage; using defaults."
             )
 
-        env = cfg.run.conda_env
         cmd = [
-            "conda", "run", "-n", env,
             "flair", "transcriptome",
             "-b", str(bam_path),
             "-g", str(genome),

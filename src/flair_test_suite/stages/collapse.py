@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import warnings
+import logging
 from pathlib import Path
 
 from .base import StageBase
@@ -71,15 +71,12 @@ class CollapseStage(StageBase):
         self._flags_components = flag_parts
 
         if not flag_parts:
-            warnings.warn(
-                "No extra flags configured for collapse; using defaults.",
-                UserWarning
+            logging.warning(
+                "No extra flags configured for collapse; using defaults."
             )
 
         # --- build and return collapse command ---
-        env = cfg.run.conda_env
         cmd = [
-            "conda", "run", "-n", env,
             "flair", "collapse",
             "-q", str(query_bed),
             "-g", str(genome),

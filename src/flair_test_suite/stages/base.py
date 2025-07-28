@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
-import warnings
+import logging
 
 # core plumbing:
 # PathBuilder: constructs the stage directory and filenames
@@ -95,7 +95,7 @@ class StageBase(ABC):
             p = resolve_path(raw, root=root, data_dir=data_dir)
             resolved[key] = p
             if not p.exists():
-                warnings.warn(f"[{self.name}] Input file missing: {key} -> {p}", UserWarning)
+                logging.warning(f"[{self.name}] Input file missing: {key} -> {p}")
         return resolved
 
     def resolve_stage_flags(self, raw_flags=None) -> tuple[list[str], list[Path]]:
@@ -146,19 +146,17 @@ class StageBase(ABC):
         )
         # Emit warnings based on decision
         if action == "run" and primary.exists():
-            warnings.warn(
-                f"Primary output exists before run for {self.name}; will overwrite",
-                UserWarning
+            logging.warning(
+                f"Primary output exists before run for {self.name}; will overwrite"
             )
         if action == "qc":
-            warnings.warn(
-                f"Primary exists but QC incomplete for {self.name}; regenerating QC",
-                UserWarning
+            logging.warning(
+                f"Primary exists but QC incomplete for {self.name}; regenerating QC"
             )
 
         # --- skip case: tool already ran & QC exists ---
         if action == "skip":
-            print(f"[SKIP] {self.name} complete (sig={sig})")
+            logging.info(f"[SKIP] {self.name} complete (sig={sig})")
             try:
                 full_meta = load_marker(stage_dir)  # <-- pass the directory, not the file!
                 if not isinstance(full_meta, dict):
@@ -171,30 +169,28 @@ class StageBase(ABC):
 
         # --- QC-only case: regenerate QC sidecar ---
         if action == "qc":
-            print(f"[QC]   Regenerating QC for {self.name} (sig={sig})")
+            logging.info(f"[QC]   Regenerating QC for {self.name} (sig={sig})")
             qc_metrics = self._run_qc(stage_dir, primary, runtime=None)
             pb.metadata = qc_metrics
             marker_f = stage_dir / ".completed.json"
             old_meta = load_marker(marker_f)
+            if not isinstance(old_meta, dict):
+                old_meta = {}
             old_meta["qc"] = qc_metrics
             write_marker(pb, old_meta)
             return pb
 
         # --- run the external tool ---
         start = time.time()
-        with open(stage_dir / "tool_stdout.log", "w") as out, \
-             open(stage_dir / "tool_stderr.log", "w") as err:
-            exit_code = subprocess.call(cmd, cwd=stage_dir, stdout=out, stderr=err)
-            if exit_code != 0:
-                warnings.warn(
-                    f"External tool for stage {self.name} exited with code {exit_code}",
-                    UserWarning
-                )
+        exit_code = self.run_tool(cmd, log_path=stage_dir / "tool.log", cwd=stage_dir)
+        if exit_code != 0:
+            logging.warning(
+                f"External tool for stage {self.name} exited with code {exit_code}"
+            )
         runtime = round(time.time() - start, 2)
         if not primary.exists():
-            warnings.warn(
-                f"Stage {self.name} completed but primary output missing: {primary}",
-                UserWarning
+            logging.warning(
+                f"Stage {self.name} completed but primary output missing: {primary}"
             )
             # Add this to halt the pipeline if output is missing
             raise RuntimeError(f"Stage {self.name} failed: missing primary output {primary}")
@@ -257,7 +253,7 @@ class StageBase(ABC):
                     runtime_sec=runtime,
                 )
         except Exception as e:
-            print(f"[WARN] QC for '{self.name}' failed: {e}")
+            logging.info(f"QC for '{self.name}' failed: {e}")
             return {}
 
     @property
@@ -287,3 +283,23 @@ class StageBase(ABC):
     def input_hashes(self) -> List[str]:
         """List of file hashes used for signature calculation."""
         return getattr(self, "_input_hashes", [])
+    
+    def run_tool(self, cmd: list[str], log_path: Path = None, cwd: Path = None) -> int:
+        """
+        Run a tool command (e.g., flair) in the configured environment.
+        Handles logging, error checking, and environment selection.
+        Returns the exit code.
+        """
+        import subprocess
+        import logging
+
+        env = self.cfg.run.conda_env
+        full_cmd = ["conda", "run", "-n", env] + cmd if cmd[0] != "conda" else cmd
+        log_path = log_path or Path("tool.log")
+        logging.info(f"[{self.name}] Running: {' '.join(full_cmd)}")
+        with open(log_path, "w") as logf:
+            proc = subprocess.run(full_cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=cwd)
+        if proc.returncode != 0:
+            logging.error(f"[{self.name}] Command failed: {' '.join(full_cmd)} (exit {proc.returncode})")
+            raise RuntimeError(f"{self.name} failed with exit code {proc.returncode}")
+        return proc.returncode

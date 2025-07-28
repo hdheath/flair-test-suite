@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-import csv, subprocess, warnings
+import csv, subprocess, logging
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
@@ -25,12 +25,12 @@ def _read_regions(tsv: Path) -> List[Region]:
             continue
         parts = line.split()
         if len(parts) < 3:
-            warnings.warn(f"regions TSV line {ln}: fewer than 3 columns", UserWarning)
+            logging.warning(f"regions TSV line {ln}: fewer than 3 columns")
             continue
         try:
             chrom = parts[0]; s = int(parts[1]); e = int(parts[2])
         except ValueError:
-            warnings.warn(f"regions TSV line {ln}: non-integer coords", UserWarning)
+            logging.warning(f"regions TSV line {ln}: non-integer coords")
             continue
         if s > e:
             s, e = e, s
@@ -95,13 +95,13 @@ class SliceStage(StageBase):
         flags = next(st.flags for st in cfg.run.stages if st.name == "slice")
 
         # GTF path (required)
-        gtf = getattr(flags, "gtf", None)
+        gtf = flags.get("gtf")
         if not gtf:
             raise RuntimeError("No GTF specified in slice stage flags.")
         self._gtf_path = resolve_path(gtf, root=root, data_dir=data_dir)
 
         # Optional user override
-        override_bed = getattr(flags, "bed", None)
+        override_bed = flags.get("bed")
         self._bed_source = "align"
         if override_bed:
             self._bed_file = resolve_path(override_bed, root=root, data_dir=data_dir)
@@ -115,7 +115,7 @@ class SliceStage(StageBase):
         else:
             raise RuntimeError("No valid BED file found for slice stage.")
 
-        regions_tsv = getattr(flags, "regions_tsv", None)
+        regions_tsv = flags.get("regions_tsv")
         if not regions_tsv:
             raise RuntimeError("No regions_tsv specified in slice stage flags.")
         regions_tsv_path = resolve_path(regions_tsv, root=root, data_dir=data_dir)
@@ -133,7 +133,7 @@ class SliceStage(StageBase):
         ]
         self._optional: Dict[str, Path] = {}
         for k in opt_keys:
-            v = getattr(flags, k, None)
+            v = flags.get(k)
             if v:
                 self._optional[k] = resolve_path(v, root=root, data_dir=data_dir)
 
@@ -166,6 +166,7 @@ class SliceStage(StageBase):
         # Slice BAM
         bam_out = d / "combined_region.bam"
         if Reinstate.decide(d, bam_out, needs_qc=False, stage_name=self.name) == "skip":
+            logging.info(f"[SKIP] {self.name} complete (sig={self.signature})")
             return pb
         t0 = time.time()
         view = ["samtools", "view", "-b", str(self._align_bam), *self._intervals]
@@ -187,14 +188,14 @@ class SliceStage(StageBase):
         if self._bed_file.exists():
             filter_file_by_regions(self._bed_file, bed_out, self._lookup, "bed")
         else:
-            warnings.warn(f"BED missing: {self._bed_file}", UserWarning)
+            logging.warning(f"BED missing: {self._bed_file}")
 
         # GTF slice
         gtf_out = d / "combined_region.gtf"
         if self._gtf_path.exists():
             filter_file_by_regions(self._gtf_path, gtf_out, self._lookup, "gtf")
         else:
-            warnings.warn(f"GTF missing: {self._gtf_path}", UserWarning)
+            logging.warning(f"GTF missing: {self._gtf_path}")
 
         # Extras
         for k, pth in self._optional.items():
@@ -206,9 +207,9 @@ class SliceStage(StageBase):
                 elif suf == ".tab":
                     filter_file_by_regions(pth, out, self._lookup, "tab")
                 else:
-                    warnings.warn(f"Skipping unsupported optional: {pth.name}", UserWarning)
+                    logging.warning(f"Skipping unsupported optional: {pth.name}")
             else:
-                warnings.warn(f"Optional missing: {pth}", UserWarning)
+                logging.warning(f"Optional missing: {pth}")
 
         # Details
         det = d / "slice_region_details.tsv"
