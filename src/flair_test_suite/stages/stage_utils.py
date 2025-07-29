@@ -1,15 +1,11 @@
 # src/flair_test_suite/stages/stage_utils.py
 # -----------------------------------------
-# Hand‑rolled shared helpers for Stage* classes.
-# Keeping them here (rather than in core/) lets us import without a circular
-# dependency, since StageBase already lives in stages/.
+# shared helpers for Stage* classes.
 
 from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Iterable, Iterator, Tuple, List
-
-# ── I/O helpers -----------------------------------------------------
 
 def count_reads(fp: Path) -> int:
     """Return # reads in a FASTA/FASTQ file (cheap header scan)."""

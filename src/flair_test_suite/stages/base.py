@@ -234,7 +234,7 @@ class StageBase(ABC):
                     out_dir=stage_dir,
                     n_input_reads=getattr(self, "_n_input_reads", None),
                     align_sig=align_sig,
-                    genome_fa=genome_fa,  # <-- add this line
+                    genome_fa=genome_fa, 
                     runtime_sec=runtime,
                 )
             elif self.name == "align":
@@ -242,7 +242,7 @@ class StageBase(ABC):
                     primary,
                     out_dir=stage_dir,
                     n_input_reads=getattr(self, "_n_input_reads", None),
-                    genome_fa=genome_fa,  # <-- add this line
+                    genome_fa=genome_fa,
                     runtime_sec=runtime,
                 )
             else:

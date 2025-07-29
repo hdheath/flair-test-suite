@@ -67,6 +67,7 @@ class CollapseStage(StageBase):
 
         # --- parse flags and extra inputs ---
         flag_parts, extra_inputs = self.resolve_stage_flags()
+        flag_parts.append("--generate_map") # For downstream QC
         self._hash_inputs = [query_bed, genome, upstream_sig, *reads, *extra_inputs]
         self._flags_components = flag_parts
 
