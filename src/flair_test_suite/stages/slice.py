@@ -75,7 +75,6 @@ class SliceStage(StageBase):
 
     def build_cmd(self):
         cfg = self.cfg
-        root = Path(cfg.run.input_root)
         data_dir = Path(cfg.run.data_dir)
 
         # Determine upstream BED/BAM
@@ -98,13 +97,13 @@ class SliceStage(StageBase):
         gtf = flags.get("gtf")
         if not gtf:
             raise RuntimeError("No GTF specified in slice stage flags.")
-        self._gtf_path = resolve_path(gtf, root=root, data_dir=data_dir)
+        self._gtf_path = resolve_path(gtf, data_dir=data_dir)
 
         # Optional user override
         override_bed = flags.get("bed")
         self._bed_source = "align"
         if override_bed:
-            self._bed_file = resolve_path(override_bed, root=root, data_dir=data_dir)
+            self._bed_file = resolve_path(override_bed, data_dir=data_dir)
             self._bed_source = "override"
         elif correct_pb and self._correct_bed.exists():
             self._bed_file = self._correct_bed
@@ -118,7 +117,7 @@ class SliceStage(StageBase):
         regions_tsv = flags.get("regions_tsv")
         if not regions_tsv:
             raise RuntimeError("No regions_tsv specified in slice stage flags.")
-        regions_tsv_path = resolve_path(regions_tsv, root=root, data_dir=data_dir)
+        regions_tsv_path = resolve_path(regions_tsv, data_dir=data_dir)
         self._regions = _read_regions(regions_tsv_path)
         self._intervals = [f"{c}:{s}-{e}" for c, s, e in self._regions]
         self._lookup = IntervalLookup(self._regions)
@@ -135,7 +134,7 @@ class SliceStage(StageBase):
         for k in opt_keys:
             v = flags.get(k)
             if v:
-                self._optional[k] = resolve_path(v, root=root, data_dir=data_dir)
+                self._optional[k] = resolve_path(v, data_dir=data_dir)
 
         # Hash inputs
         self._hash_inputs = [

@@ -87,12 +87,11 @@ class StageBase(ABC):
             genome = resolved["genome"]
             reads = resolved["reads"]
         """
-        root = Path(self.cfg.run.input_root)
         data_dir = Path(self.cfg.run.data_dir)
         from .stage_utils import resolve_path
         resolved = {}
         for key, raw in inputs.items():
-            p = resolve_path(raw, root=root, data_dir=data_dir)
+            p = resolve_path(raw, data_dir=data_dir)
             resolved[key] = p
             if not p.exists():
                 logging.warning(f"[{self.name}] Input file missing: {key} -> {p}")
@@ -104,12 +103,11 @@ class StageBase(ABC):
         Returns (flag_parts, extra_inputs).
         """
         cfg = self.cfg
-        root = Path(cfg.run.input_root)
         data_dir = Path(cfg.run.data_dir)
         if raw_flags is None:
             stage_cfg = get_stage_config(cfg, self.name)
             raw_flags = getattr(stage_cfg, "flags", {}) or {}
-        flag_parts, extra_inputs = parse_cli_flags(raw_flags, root=root, data_dir=data_dir)
+        flag_parts, extra_inputs = parse_cli_flags(raw_flags, data_dir=data_dir)
         return flag_parts, extra_inputs
 
     @abstractmethod

@@ -14,12 +14,12 @@ def count_reads(fp: Path) -> int:
     return sum(1 for _ in fp.open()) // 4
 
 
-def resolve_path(raw: str | Path, *, root: Path, data_dir: Path) -> Path:
+def resolve_path(raw: str | Path, *, data_dir: Path) -> Path:
     """
-    Expand a path relative to <root>/<data_dir> unless it is already absolute.
+    Expand a path relative to <data_dir> unless it is already absolute.
     """
     p = Path(raw)
-    return p if p.is_absolute() else (root / data_dir / p).resolve()
+    return p if p.is_absolute() else (data_dir / p).resolve()
 
 # ── flag parsing helpers -------------------------------------------
 
@@ -50,7 +50,6 @@ def iter_stage_flags(flags_block) -> Iterator[Tuple[str, object]]:
 def parse_cli_flags(
     flags_block,
     *,
-    root: Path,
     data_dir: Path,
 ) -> Tuple[List[str], List[Path]]:
     """
@@ -77,7 +76,7 @@ def parse_cli_flags(
         elif isinstance(v, (int, float)):
             _push(k, v)
         else:                    # assume path‑like
-            p = resolve_path(v, root=root, data_dir=data_dir)
+            p = resolve_path(v, data_dir=data_dir)
             _push(k, p)
             extra_inputs.append(p)
 

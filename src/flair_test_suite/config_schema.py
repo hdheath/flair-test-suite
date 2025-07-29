@@ -10,7 +10,6 @@ class RunConfig(BaseModel):
     version: str
     conda_env: str
     work_dir: str
-    input_root: str
     data_dir: str
     reads_file: Optional[str] = None
     genome_fa: Optional[str] = None

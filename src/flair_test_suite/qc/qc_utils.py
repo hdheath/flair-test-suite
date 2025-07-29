@@ -1,6 +1,24 @@
 # src/flair_test_suite/qc/qc_utils.py
 # -------------------------------------------------
 # Shared helpers used by QC collector modules.
+# Requirements:
+#  • Python standard library: subprocess, itertools, collections, multiprocessing
+#  • pysam               # for reading BAM and FASTA files
+# Summary:
+#   Provides common utility functions for QC collectors, including counting lines,
+#   computing percentages, iterating primary alignments, counting splice junctions,
+#   and extracting splice junction motifs in parallel.
+# Functions:
+#   count_lines(path) -> int
+#       Runs `wc -l` on a file to return its line count.
+#   percent(numerator, denominator, digits=2) -> float
+#       Computes (numerator/denominator)*100 rounded to `digits`.
+#   iter_primary(bam, limit) -> Iterator[AlignedSegment]
+#       Streams up to `limit` primary alignments from a BAM.
+#   count_unique_junctions(bed_path, sample_limit=None) -> int
+#       Counts unique (chrom, donor, acceptor, strand) junctions in a BED12.
+#   count_splice_junction_motifs(...)
+#       Counts 4-mer splice site motifs around junctions using multiprocessing.
 
 from __future__ import annotations
 from pathlib import Path
@@ -18,20 +36,28 @@ __all__ = [
     "iter_primary",
     "count_unique_junctions",
     "SAMPLE_LIMIT",
+    "count_splice_junction_motifs",
 ]
 
 # ------------------------------------------------------------------
 # Simple helpers ----------------------------------------------------
 
 def count_lines(path: Path) -> int:
-    """Cheap line‑count using `wc -l`. Raises if the command fails."""
+    """
+    Count the number of lines in a file using `wc -l`.
+    Raises if the command fails.
+    """
     return int(
-        subprocess.check_output(["wc", "-l", str(path)], text=True).split()[0]
+        subprocess.check_output(["wc", "-l", str(path)], text=True)
+        .split()[0]
     )
 
 
 def percent(numerator: int, denominator: int, digits: int = 2) -> float:
-    """Compute 100·numerator/denominator rounded to *digits* decimals."""
+    """
+    Compute percentage = 100 * numerator / denominator, rounded to `digits`.
+    Returns 0.0 if denominator is zero.
+    """
     if denominator == 0:
         return 0.0
     return round(100 * numerator / denominator, digits)
@@ -39,127 +65,158 @@ def percent(numerator: int, denominator: int, digits: int = 2) -> float:
 # ------------------------------------------------------------------
 # Streaming helper for large BAMs ----------------------------------
 
-# Hard‑coded cap on how many primary alignments we sample when
-# computing identities & soft‑clip statistics. Feel free to tweak.
+# Cap on sampled alignments for QC metrics
 SAMPLE_LIMIT: int = 2_000_000
-PRIMARY_ONLY_FLAGMASK = 0x904  # secondary | supplementary | unmapped flags
+# Flag mask to exclude secondary, supplementary, and unmapped reads
+PRIMARY_ONLY_FLAGMASK = 0x904
 
-
-def iter_primary(bam: pysam.AlignmentFile, limit: int | None = SAMPLE_LIMIT) -> Iterator[pysam.AlignedSegment]:
-    """Yield at most *limit* primary alignments from *bam*.
-
-    Primary = not (secondary | supplementary | unmapped).
+def iter_primary(
+    bam: pysam.AlignmentFile,
+    limit: int | None = SAMPLE_LIMIT
+) -> Iterator[pysam.AlignedSegment]:
     """
-    n = 0
+    Yield up to `limit` primary alignments (not secondary/supplementary/unmapped).
+    """
+    count = 0
     for aln in bam.fetch(until_eof=True):
+        # Skip if any excluded flags present
         if aln.flag & PRIMARY_ONLY_FLAGMASK:
             continue
         yield aln
-        n += 1
-        if limit is not None and n >= limit:
+        count += 1
+        if limit is not None and count >= limit:
             break
 
 # ------------------------------------------------------------------
 # Junction counting from BED12 -------------------------------------
 
 def _parse_blocks(block_sizes: str, block_starts: str) -> tuple[list[int], list[int]]:
+    """
+    Parse BED12 blockSizes and blockStarts into integer lists.
+    """
     sizes = list(map(int, block_sizes.rstrip(",").split(",")))
     starts = list(map(int, block_starts.rstrip(",").split(",")))
     return sizes, starts
 
 
-def count_unique_junctions(bed_path: Path, sample_limit: int | None = None) -> int:
-    """Return number of unique splice junctions in a BED12 file.
-
-    A junction is defined as (chrom, donor, acceptor, strand). Reads with
-    fewer than 2 blocks are skipped.
-    *sample_limit* can cap how many lines to parse for very large files;
-    default is None (full scan).
+def count_unique_junctions(
+    bed_path: Path,
+    sample_limit: int | None = None
+) -> int:
+    """
+    Count unique splice junctions in a BED12 file.
+    Junction defined by (chrom, donor, acceptor, strand).
+    Optionally limit scanning to first `sample_limit` lines.
     """
     seen: set[tuple[str, int, int, str]] = set()
     with open(bed_path) as fh:
         for idx, line in enumerate(fh):
-            if line.startswith("#") or not line.strip():
+            if not line.strip() or line.startswith('#'):
                 continue
             if sample_limit is not None and idx >= sample_limit:
                 break
             cols = line.rstrip("\n").split("\t")
+            # Ensure BED12 format
             if len(cols) < 12:
-                continue  # skip if not BED12
+                continue
             chrom = cols[0]
             chrom_start = int(cols[1])
             strand = cols[5]
             block_count = int(cols[9])
             if block_count < 2:
                 continue
-            block_sizes = cols[10]
-            block_starts = cols[11]
-            sizes, starts = _parse_blocks(block_sizes, block_starts)
+            sizes, starts = _parse_blocks(cols[10], cols[11])
+            # Extract donor and acceptor positions for each intron
             for i in range(block_count - 1):
                 donor = chrom_start + starts[i] + sizes[i]
-                acceptor = chrom_start + starts[i + 1]
+                acceptor = chrom_start + starts[i+1]
                 seen.add((chrom, donor, acceptor, strand))
     return len(seen)
 
-def revcomp(s: str) -> str:
-    RC = str.maketrans("ACGTacgtNn", "TGCAtgcaNn")
-    return s.translate(RC)[::-1]
+# ------------------------------------------------------------------
+# Splice junction motif extraction --------------------------------
 
-def bed_reader(path):
+def revcomp(seq: str) -> str:
+    """
+    Return the reverse complement of a DNA sequence.
+    """
+    trans = str.maketrans("ACGTacgtNn", "TGCAtgcaNn")
+    return seq.translate(trans)[::-1]
+
+
+def bed_reader(path: Path) -> Iterator[list[str]]:
+    """
+    Yield BED fields lines, skipping headers and empty lines.
+    """
     with open(path) as fh:
         for ln in fh:
             if not ln.strip() or ln.startswith(("track","browser","#")):
                 continue
             yield ln.rstrip().split('\t')
 
-def introns_from_bed(fields):
-    chrom      = fields[0]
+
+def introns_from_bed(fields: list[str]) -> Iterator[tuple[str,int,int,str]]:
+    """
+    Yield (chrom, donor_end, acceptor_start, strand) for each intron in BED12 fields.
+    """
+    chrom = fields[0]
     chromStart = int(fields[1])
-    strand     = fields[5]
-    sizes      = list(map(int, fields[10].rstrip(',').split(',')))
-    starts     = list(map(int, fields[11].rstrip(',').split(',')))
+    strand = fields[5]
+    sizes = list(map(int, fields[10].rstrip(',').split(',')))
+    starts = list(map(int, fields[11].rstrip(',').split(',')))
     for i in range(len(sizes) - 1):
-        exon1_end   = chromStart + starts[i]     + sizes[i]
+        exon1_end = chromStart + starts[i] + sizes[i]
         exon2_start = chromStart + starts[i+1]
         yield chrom, exon1_end, exon2_start, strand
 
-def chunk(lst, n):
+
+def chunk(lst: list, n: int) -> list[list]:
+    """
+    Split list `lst` into `n` roughly equal chunks.
+    """
     k, m = divmod(len(lst), n)
     return [
-        lst[i*k + min(i, m) : (i+1)*k + min(i+1, m)]
+        lst[i*k + min(i, m):(i+1)*k + min(i+1, m)]
         for i in range(n)
     ]
 
-def _sj_worker(args):
+
+def _sj_worker(args) -> Counter:
+    """
+    Worker function: extract 4-mer motifs around splice junctions for a chunk of BED entries.
+    """
     bed_fields_list, fasta_path, don_ex, don_in, acc_in, acc_ex = args
     fasta = pysam.FastaFile(str(fasta_path))
     ctr = Counter()
     for fields in bed_fields_list:
         for chrom, s, e, strand in introns_from_bed(fields):
             if strand == '+':
-                donor    = fasta.fetch(chrom, s - don_ex,   s + don_in)
-                acceptor = fasta.fetch(chrom, e - acc_in,   e + acc_ex)
+                donor = fasta.fetch(chrom, s-don_ex, s+don_in)
+                acceptor = fasta.fetch(chrom, e-acc_in, e+acc_ex)
             else:
-                donor    = revcomp(fasta.fetch(chrom, e - don_in,   e + don_ex))
-                acceptor = revcomp(fasta.fetch(chrom, s - acc_ex,   s + acc_ex))
-            ref4 = (donor[-2:] + acceptor[:2]).upper()
-            ctr[(strand, ref4)] += 1
+                donor = revcomp(fasta.fetch(chrom, e-don_in, e+don_ex))
+                acceptor = revcomp(fasta.fetch(chrom, s-acc_ex, s+acc_ex))
+            motif = (donor[-2:] + acceptor[:2]).upper()
+            ctr[(strand, motif)] += 1
     fasta.close()
     return ctr
 
+
 def count_splice_junction_motifs(
-    bed_path,
-    fasta_path,
-    max_workers=None,
-    max_bed_lines=100_000,
-    don_ex=2, don_in=2, acc_in=2, acc_ex=2
-):
+    bed_path: Path,
+    fasta_path: Path,
+    max_workers: int | None = None,
+    max_bed_lines: int = 100_000,
+    don_ex: int = 2, don_in: int = 2,
+    acc_in: int = 2, acc_ex: int = 2
+) -> Counter:
     """
-    Count 4-mer splice junction motifs in a BED12 file using the reference genome.
-    Returns a Counter: (strand, motif) -> count
+    Count 4-mer splice site motifs by reading up to `max_bed_lines` BED entries,
+    grouping by chromosome, and using up to `max_workers` parallel processes.
+    Returns Counter mapping (strand, motif) -> count.
     """
     if max_workers is None:
-        max_workers = 4  # Default to 4 if not set
+        max_workers = 4
 
     # Read BED lines
     if max_bed_lines is None:
@@ -169,34 +226,34 @@ def count_splice_junction_motifs(
     if not all_fields:
         raise ValueError("No usable BED lines!")
 
-    # Group by chromosome
-    chrom_groups = defaultdict(list)
+    # Group entries by chromosome
+    chrom_groups: dict[str, list] = defaultdict(list)
     for fields in all_fields:
         chrom_groups[fields[0]].append(fields)
 
+    # Determine number of workers
     n_workers = min(max_workers, cpu_count())
-    # Build chunks
+    # Create chunks for parallel work
     if len(chrom_groups) > 1:
-        chroms = list(chrom_groups.keys())
+        # Split chromosomes across workers
+        chroms = list(chrom_groups)
         chrom_chunks = chunk(chroms, min(n_workers, len(chroms)))
-        chunks = []
-        for cchunk in chrom_chunks:
-            group = []
-            for chrom in cchunk:
-                group.extend(chrom_groups[chrom])
-            if group:
-                chunks.append(group)
+        bed_chunks = [
+            sum((chrom_groups[c] for c in grp), [])
+            for grp in chrom_chunks
+        ]
     else:
-        single = next(iter(chrom_groups.values()))
-        chunks = [c for c in chunk(single, n_workers) if c]
+        # Single chromosome: split entries evenly
+        single_list = next(iter(chrom_groups.values()))
+        bed_chunks = [c for c in chunk(single_list, n_workers) if c]
 
-    # Run in parallel
-    args = [(chunk, fasta_path, don_ex, don_in, acc_in, acc_ex) for chunk in chunks]
-    with Pool(processes=len(chunks)) as pool:
+    # Prepare arguments and run workers
+    args = [(chunk, fasta_path, don_ex, don_in, acc_in, acc_ex) for chunk in bed_chunks]
+    with Pool(processes=len(bed_chunks)) as pool:
         results = pool.map(_sj_worker, args)
 
-    # Merge results
+    # Merge partial results
     total = Counter()
-    for ctr in results:
-        total.update(ctr)
+    for res in results:
+        total.update(res)
     return total
