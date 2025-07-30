@@ -31,7 +31,7 @@ requires = ["align"]
 
 [run.stages.flags]
 gtf = ""	
-regions_tsv = ""    # regions you would like to parse for (user created)
+regions_tsv = ""    # (eg regions_of_interest.tsv)
 junctions = ""   			              # optional
 experiment_5_prime_regions_bed_file = ""  # optional
 experiment_3_prime_regions_bed_file = ""  # optional
