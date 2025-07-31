@@ -10,9 +10,7 @@
 1. [Installation & Setup](#installation--setup-single-step-conda--pip)
 2. [Before Running the Test Suite](#before-running-the-test-suite)
 3. [Running the Test Suite](#running-the-test-suite)
-4. [Pipeline Stages & QC](#pipeline-stages--qc)
-5. [Output Layout](#output-layout)
-6. [Contributing & License](#contributing--license)
+4. [Contributing & License](#contributing--license)
 
 ---
 

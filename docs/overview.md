@@ -7,7 +7,9 @@ This FLAIR test suite provides the means for running and benchmarking different 
 1. [Glossary](#glossary)
 2. [Workflow](#workflow)
 3. [Dataset types](#dataset-types)
-3. [Dataset Attributes](#dataset-attributes)
+4. [Dataset Attributes](#dataset-attributes)
+5. [Pipeline Stages & QC](#pipeline-stages--qc)
+6. [Output Layout](#output-layout)
 
 ---
 
@@ -30,7 +32,7 @@ This FLAIR test suite provides the means for running and benchmarking different 
 
 The FLAIR Test Suite is organized around **end-to-end test cases** After each stage of a test-case, a set of **QC Checkpoints** validate the intermediate outputs.
 
-![FLAIR Test Suite Workflow Diagram](docs/images/workflow.png)
+![FLAIR Test Suite Workflow Diagram](./images/FLAIR_test_suite_schematic_v.4.svg )
 
 ---
 
@@ -94,6 +96,38 @@ The test suite expects the user to have, at bare minimum :
 | `ground truth`          | (TBD)  , strictly for simulated data                                      |
 
 ---
+
+
+## Pipeline Stages & QC
+
+| Stage           | Primary output(s)     | QC metrics / plots                                          |
+| --------------- | --------------------- | ----------------------------------------------------------- |
+| `align`         | BAM + BED             | MAPQ, read identity/length, unique junctions, splice motifs |
+| `correct`       | corrected BED         | reads removed %, unique junctions, splice-motifs            |
+| `slice`         | region BAM/BED/FA/GTF | feature counts from GTF (e.g., number of genes)             |
+| `collapse`      | isoforms BED/GTF      | *QC TBD*                                                    |
+| `transcriptome` | isoforms BED/GTF      | *QC TBD*                                                    |
+
+PNG plots and TSV metrics are saved next to each stage’s outputs.
+
+---
+
+## Output Layout
+
+Each stage saves output under `outputs/<run_id>/<stage>/<signature>/`
+
+### Example of Output Tree
+
+```plaintext
+outputs/
+└── <run_id>/
+    ├── run_summary.log
+    ├── align/<sig>/
+    ├── correct/<sig>/
+    ├── slice/<sig>/
+    ├── collapse/<sig>/
+    └── transcriptome/<sig>/
+```
 
 
 
