@@ -2,7 +2,7 @@
 
 ## **⚠️** Important
 
-* Find config templates in `configs/<stages_to_run>_template.toml`.
+* Find config templates in `config/<stages_to_run>_template.toml`.
 
 * All relative paths provided in the config resolve against `data_dir`.
 
