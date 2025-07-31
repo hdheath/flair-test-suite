@@ -1,0 +1,81 @@
+# Guide to Creating Configurations for Test Cases
+
+## ⚠️ Important
+
+* Find config templates in `configs/<stages_to_run>_template.toml`.
+
+* All relative paths provided in the config resolve against `data_dir`.
+
+* For targeted region runs:
+
+  * Include the `slice` stage in your template.
+  * Create a 3‑column TSV file (e.g., `regions.tsv`) with columns: `chr`, `start`, `end`.
+  * Save `regions.tsv` in the same directory as your input data.
+
+## Choosing a Template
+
+Select one of the four supported workflows and copy its template from `configs/`:
+
+1. **Align → Correct → Collapse**
+2. **Align → Correct → Slice → Collapse**
+3. **Align → Transcriptome** (requires **FLAIR ≥ 3.0**)
+4. **Align → Slice → Transcriptome** (requires **FLAIR ≥ 3.0**)
+
+## Editing and Saving Templates
+
+1. Set `run_id` under `[run]` to name your output folder.
+2. Edit the six fields under `[run]`: `version`, `conda_env`, `work_dir`, `data_dir`, `reads_file`, `genome_fa`.
+3. Add any CLI flags under each `[run.stages.flags]`; leave blank to use FLAIR defaults.
+4. Save your edited TOML file in the `configs/` directory.
+
+## Example Configuration
+
+```toml
+# Align → Correct → Slice → Collapse Configuration
+
+run_id = "WTC11"
+
+[run]
+version    = "3.0.0"                # FLAIR version
+conda_env  = "flair"                # conda env name
+work_dir   = "./outputs"            # output directory
+data_dir   = "./tests/data"         # input data directory
+reads_file = "WTC11_reads.fasta"    # long-read FASTA
+genome_fa  = "gr38.gtf"             # reference genome FASTA
+
+[[run.stages]]
+name = "align"
+
+[run.stages.flags]
+nvrna   = true  # on/off flag
+quality = 0
+
+[[run.stages]]
+name     = "correct"
+requires = ["align"]
+
+[run.stages.flags]
+gtf          = "hs_GENCODE38.basic_annotation.gtf"
+junction_bed = "WTC11_all.SJ.out.tab"
+
+[[run.stages]]
+name     = "slice"
+requires = ["correct"]
+
+[run.stages.flags]
+gtf                                 = "hs_GENCODE38.basic_annotation.gtf"
+regions_tsv                         = "regions_of_interest.tsv"
+junctions                           = "WTC11.tab"                 # optional
+experiment_5_prime_regions_bed_file = ""                          # optional
+experiment_3_prime_regions_bed_file = ""                          # optional
+reference_5_prime_regions_bed_file  = ""                          # optional
+reference_3_prime_regions_bed_file  = ""                          # optional
+
+[[run.stages]]
+name     = "collapse"
+requires = ["slice"]
+
+[run.stages.flags]
+```
+
+For more details, see the [FLAIR Test Suite Overview](./overview.md).

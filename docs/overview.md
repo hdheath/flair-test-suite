@@ -6,7 +6,7 @@ The FLAIR Test Suite is organized to cover the pipeline’s functionality across
 
 ### Design
 
-The FLAIR Test Suite is organized around **end-to-end test cases**, where each **test-case** is a complete FLAIR workflow from raw reads through FLAIR quantify with self-contained stage options at each step. After each stage of a test-case, a set of **QC Checkpoints** (sub-tests) validate the intermediate outputs to decide if the run should continue. 
+The FLAIR Test Suite is organized around **end-to-end test cases**, where each **test-case** is a complete FLAIR workflow from raw reads through FLAIR quantify with self-contained stage options at each step. After each stage of a test-case, a set of **QC Checkpoints** (sub-tests) validate the intermediate outputs.
 
 ---
 
@@ -79,88 +79,4 @@ In each test case you specify the **FLAIR version** to run (for example, `v1.5` 
 
 
 ---
-
-## Summary of Test Suite Structure
-
-In practice, each test case is uniquely identified and tagged along four dimensions:
-
-| Dimension   | Example Tags                             |
-|-------------|------------------------------------------|
-| **Dataset** | `Simulated`, `PacBio HiFi`               |
-| **Region**  | `chr21:42000-62000,chr13:14300-15000`, `WholeTranscriptome`, `chr13` |
-| **Version** | `v1.5`, `v2.0-dev`, `v2.0-newFeatures`   |
- 
-
-## Example Directory Layout
-```plaintext
-├── outputs/
-│       └── <sample>/                                 # Sample identifier (e.g., human_GENCODEv48_WTC11)
-│               ├── align/                            # FLAIR align output 
-│               │      ├── <flags>.bam
-│               │      └── <sample><flags>.bed
-│               │
-│               ├── correct/                          # FLAIR correct output
-│               │   └── correct_<flags>/
-│               │       ├── <flags>.corrected.bam
-│               │       └── <flags>.corrected.bed
-│               │
-│               ├── regions/                          # sliced files used for FLAIR collapse runs
-│               │   └── chr20_3218000_3250000/
-│               │       ├── raw/                 
-│               │       │   ├── chr20…-3250000.bam
-│               │       │   ├── chr20…-3250000.bed
-│               │       │   ├── chr20…-3250000.gtf
-│               │       │   ├── chr20…-3250000.fasta
-│               │       │   ├── chr20…-3250000.bed
-│               │       │   └── …
-│               │       │
-│               │       ├── collapse/                 # FLAIR collapse per-region, using different options 
-│               │       │   └── collapse_<flags>/
-│               │       │       ├── *.isoforms.gtf
-│               │       │       └── *.isoforms.bed
-│               │       ├── transcriptome/            # FLAIR transcriptome per-region, using different options 
-│               │       │   └── transcriptome_<flags>/
-│               │       │       ├── *.isoforms.gtf
-│               │       │       └── *.isoforms.bed
-│               │       │
-│               │       ├── collapse_qc/              # FLAIR collapse QC for this region across all runs 
-│               │       │   ├── sqanti_summary.tsv
-│               │       │   ├── sqanti.png
-│               │       │   ├── ted_summary.tsv
-│               │       │   ├── ted.png
-│               │       │   └── region_metrics.png
-│               │       │
-│               │       ├── quantify/                 # FLAIR quantify per-region, using different options 
-│               │       │   └── quantify_<flags>/
-│               │       │       ├── isoform_tpm.tsv
-│               │       │       └── gene_counts.tsv
-│               │       │
-│               │       └── quantify_qc/              # FLAIR quantify QC for this region across all runs 
-│               │           └── flair_quantify_metrics.png
-│               │
-│               └── logs/
-│                   ├── <align_id>.time.log
-│                   ├── <correct_id>.time.log
-│                   ├── <collapse_id>.time.log
-│                   ├── <quantify_id>.time.log
-│                   ├── ted.time.log
-│                   ├── sqanti_error.log
-│                   └── quantify_qc.log
-└── tests/
-    └── data/
-        └── test_data_set_real/
-            ├── sample.gtf
-            └── sample_reads.fastq
-            └── reference.fastq
-            └── [optional] reference TSS/TTS bed file(s)
-            └── [optional] experiment TSS/TTS bed file(s)
-            └── [optional] reference splice junction bed file
-        └── test_data_set_simulated/
-            ├── sample.gtf
-            └── sample_reads.fastq
-            └── reference.fastq
-            └── [optional] reference TSS/TTS bed file(s)
-            └── [optional] experiment TSS/TTS bed file(s)
-            └── [optional] reference splice junction bed file
-```
 
