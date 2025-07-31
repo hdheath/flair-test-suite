@@ -83,39 +83,6 @@ flair-test-suite path/to/runs.txt
 
 ---
 
-## Pipeline Stages & QC
-
-| Stage           | Primary output(s)     | QC metrics / plots                                          |
-| --------------- | --------------------- | ----------------------------------------------------------- |
-| `align`         | BAM + BED             | MAPQ, read identity/length, unique junctions, splice motifs |
-| `correct`       | corrected BED         | reads removed %, unique junctions, splice-motifs            |
-| `slice`         | region BAM/BED/FA/GTF | feature counts from GTF (e.g., number of genes)             |
-| `collapse`      | isoforms BED/GTF      | *QC TBD*                                                    |
-| `transcriptome` | isoforms BED/GTF      | *QC TBD*                                                    |
-
-PNG plots and TSV metrics are saved next to each stage’s outputs.
-
----
-
-## Output Layout
-
-Each stage saves output under `outputs/<run_id>/<stage>/<signature>/`
-
-### Example of Output Tree
-
-```plaintext
-outputs/
-└── <run_id>/
-    ├── run_summary.log
-    ├── align/<sig>/
-    ├── correct/<sig>/
-    ├── slice/<sig>/
-    ├── collapse/<sig>/
-    └── transcriptome/<sig>/
-```
-
----
-
 ## Contributing & License
 
 * Bug reports and PRs welcome — see **`CONTRIBUTING.md`**.

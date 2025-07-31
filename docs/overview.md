@@ -1,18 +1,42 @@
 # FLAIR Test Suite Overview
 
-The FLAIR Test Suite is organized to cover the pipeline’s functionality across multiple dimensions. Test cases are grouped in ways that make it easy to target specific aspects of the pipeline or data contexts. The primary groupings are:
+This FLAIR test suite provides the means for running and benchmarking different versions of [FLAIR](https://github.com/BrooksLabUCSC/flair) **Ver. ≥ 2.0** long-read transcriptome analysis pipeline—including alignment, correction, collapse, transcriptome, and quantification. It is designed to support reproducible evaluation of transcript detection methods across a variety of organisms, sequencing protocols, and parameter configurations.
+
+## Contents
+
+1. [Glossary](#glossary)
+2. [Workflow](#workflow)
+3. [Dataset types](#dataset-types)
+3. [Dataset Attributes](#dataset-attributes)
 
 ---
 
-### Design
+## Glossary
 
-The FLAIR Test Suite is organized around **end-to-end test cases**, where each **test-case** is a complete FLAIR workflow from raw reads through FLAIR quantify with self-contained stage options at each step. After each stage of a test-case, a set of **QC Checkpoints** (sub-tests) validate the intermediate outputs.
+| Term         | Definition                                                                                                                                                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_case`  | A documented config file that contains reasoning and the blueprint for a complete FLAIR workflow from raw reads through FLAIR quantify with self-contained stage options at each step.                                         |
+| `run`        | An end-to-end execution of a `test_case` (identified by `run_id`).                                                                                                                                                                |
+| `stage`      | One FLAIR sub-command (`align`, `correct`, `slice`, `collapse`, `transcriptome`).                                                                                                                                                |
+| `flags`      | CLI options under `[run.stages.flags]`.                                                                                                                                                                                          |
+| `signature`  | The name of the directory under `<stage>` (e.g. `align/abcd1234`), based on the signature string <code>`tool_version \| flags \| input_hashes`</code>. Helps determine if a stage has already been completed and can be skipped. |
+
+
 
 ---
 
-### Dataset Type
 
-Test cases are defined by the nature of the dataset:
+## Workflow
+
+The FLAIR Test Suite is organized around **end-to-end test cases** After each stage of a test-case, a set of **QC Checkpoints** validate the intermediate outputs.
+
+![FLAIR Test Suite Workflow Diagram](docs/images/workflow.png)
+
+---
+
+## Dataset Types
+
+Test cases are defined by the nature of the dataset. Long-read data acceptable for the test-suite include : 
 
 - **Simulated Data Tests**  
   Use artificial datasets where the “true” isoforms are known in advance (e.g., simulated reads from a known transcript set, or spike-in controls). These help validate correctness without biological ambiguity.
@@ -26,57 +50,50 @@ Test cases are defined by the nature of the dataset:
 
 This grouping ensures that any changes affecting a specific data type (e.g., poly(A) tail handling) can be checked in isolation, and helps identify data-specific issues.
 
-#### *Dataset* attributes
-- *name*  
-- *description*  
-- *data_source* – real or simulated  
-- *organism*  
-- *assembly*  
-- *platform* – ONT or PB  
-- *read_fastq* – one or more FASTQ files  
-- *gene_set_name*  
-- *gene_set_annot_gtf* – GTF annotation file  
-- *gene_set_meta_tsv* – TSV with metadata (extracted from GTF)  
-- *splice_junctions_files* – splice junction files (STAR, BED)  
-- *tss_evidence* – TSS evidence files (CAGE, etc)  
-- *tes_evidence* – TES evidence files (QuantSeq, etc)  
-- *ground_truth* – for simulated data  
-
----
-
 ### Region/Scope
 
 Test cases are also defined by region. A region is a genomic coordinate where we expect FLAIR to analyze transcripts. Test cases choose one of these region scopes:
 
 - **Targeted Region Tests**  
-  Run on a limited locus or small gene set (e.g., reads mapping to chr21 or a single gene). Cover challenging regions (e.g., high gene density, pseudogenes, repetitive sequences). Helps ensure corner cases are regularly checked.
+  Run on a limited locus or small gene set (e.g., reads mapping to chr21 or a single gene). Cover challenging regions (e.g., high gene density, pseudogenes, repetitive sequences). Helps ensure corner cases are regularly checked and helps select quick tests for fast feedback.  
+**⚠️ Note:** **To implement a targeted region test** use a template that includes the `slice` stage. 
 
 - **Whole-Transcriptome Tests**  
   Run on genome-wide data (e.g., whole human transcriptome) to ensure the pipeline scales to full dataset sizes and complexities.
 
-Grouping by region helps select quick tests for fast feedback or full-scale validation to reveal scale-dependent issues (e.g., memory leaks).
-
-#### *Region* attributes
-- *chr*
-- *start*  
-- *end*  
-
-#### *Region* considerations for selection
-- Region size  
-- Number of genes  
-- Total isoforms  
-- Median isoforms per gene  
-- Average gene length  
-- Median of mean exons per isoform  
-- Isoform entropy  
-- RNA biotypes (e.g., % protein coding vs lncRNA)  
-
----
-
 ### FLAIR Version
 
-In each test case you specify the **FLAIR version** to run (for example, `v1.5` or `v2.0-dev`). 
+Test cases are further defined by the **FLAIR version** that is ran.
+
+| FLAIR tag | Supported stages                               |
+| --------- | ---------------------------------------------- |
+| **2.x**   | align, correct, collapse                       |
+| **3.x**   | align, correct, slice, collapse, transcriptome |
 
 
 ---
+
+## *Dataset* attributes
+
+The test suite expects the user to have, at bare minimum : 
+
+| Field                 | Description                                                      |
+| --------------------- | ---------------------------------------------------------------- |
+| `Long read RNA` | in fasta format 
+| `FLAIR conda env`                | Downloaded conda version(s) of FLAIR they will use                                             |
+| `Reference Genome`            | A reference genome fasta to align their long-reads to                             |
+
+⚠️ However, it is heavily recommended to also include the following input files for improved isoform classification and QC :
+
+| Field                 | Description                                                      |
+| --------------------- | ---------------------------------------------------------------- |
+| `reference gtf file`                | GTF annotation file                                              |
+| `splice junctions`            | short-read derived junction tab-file                             |
+| `TSS evidence`            | short-read derived putative transcription start sites (eg CAGE)                                   |
+| `TES evidence`            | short-read derived putative transcription end sites (eg QuantSeq)                                                      |
+| `ground truth`          | (TBD)  , strictly for simulated data                                      |
+
+---
+
+
 
