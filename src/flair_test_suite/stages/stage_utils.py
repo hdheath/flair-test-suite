@@ -57,6 +57,8 @@ def parse_cli_flags(
       • flag_parts   (for subprocess command)
       • extra_inputs (files that should be hashed)
     """
+    import logging
+
     flag_parts: List[str] = []
     extra_inputs: List[Path] = []
 
@@ -69,16 +71,24 @@ def parse_cli_flags(
             flag_parts.append(str(v))
 
     for k, v in flags_block.items():
-        if v is False:           # user explicitly disabled
+        if v is False:  # user explicitly disabled
+            logging.warning(f"Flag '{k}' is set to False and will be skipped.")
             continue
         if v in (None, "", True):
             _push(k)
         elif isinstance(v, (int, float)):
             _push(k, v)
-        else:                    # assume path‑like
+        elif isinstance(v, str):
             p = resolve_path(v, data_dir=data_dir)
-            _push(k, p)
-            extra_inputs.append(p)
+            if p.exists():
+                _push(k, p)
+                extra_inputs.append(p)
+            else:
+                logging.warning(f"Flag '{k}' value '{v}' does not resolve to an existing file. Treating as option.")
+                _push(k, v)
+        else:
+            logging.warning(f"Flag '{k}' has an unrecognized type ({type(v)}). Treating as option.")
+            _push(k, v)
 
     return flag_parts, extra_inputs
 
