@@ -31,26 +31,38 @@ class CorrectStage(StageBase):
     def build_cmd(self) -> list[str]:
         cfg = self.cfg
 
-        # --- retrieve QC metadata from align stage ---
-        meta = self.upstreams["align"].metadata
-        self._n_input_reads = meta.get("n_input_reads", meta.get("n_total_reads"))
-        if "n_input_reads" not in meta:
-            logging.warning(
-                "Using legacy metadata key 'n_total_reads' for input read count; consider rerunning align to refresh metadata."
-            )
-        if self._n_input_reads is None:
-            raise RuntimeError(
-                "align stage metadata lacks n_input_reads; delete the old signature and rerun align."
-            )
+        # --- retrieve QC metadata from upstream ---
+        upstream = None
+        bed_file = None
+        upstream_sig = None
 
-        # --- locate files produced by align ---
-        align_pb = self.upstreams["align"]
-        align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
-        if not align_bed.exists():
-            logging.warning(
-                f"Expected align output BED not found: {align_bed}"
-            )
-        align_sig = align_pb.signature
+        # Prefer slice if present, otherwise align
+        if "slice" in self.upstreams:
+            upstream = self.upstreams["slice"]
+            bed_file = upstream.stage_dir / "combined_region.bed"
+            upstream_sig = upstream.signature
+            if not bed_file.exists():
+                raise RuntimeError(f"Expected slice output BED not found: {bed_file}")
+        elif "align" in self.upstreams:
+            upstream = self.upstreams["align"]
+            bed_file = upstream.stage_dir / f"{self.run_id}_flair.bed"
+            upstream_sig = upstream.signature
+            # --- retrieve QC metadata if available ---
+            meta = upstream.metadata
+            self._n_input_reads = meta.get("n_input_reads", meta.get("n_total_reads"))
+            if "n_input_reads" not in meta:
+                logging.warning(
+                    "Using legacy metadata key 'n_total_reads' for input read count; consider rerunning upstream to refresh metadata."
+                )
+            if self._n_input_reads is None:
+                raise RuntimeError(
+                    "Upstream stage metadata lacks n_input_reads; delete the old signature and rerun upstream."
+                )
+
+            if not bed_file.exists():
+                raise RuntimeError(f"Expected align output BED not found: {bed_file}")
+        else:
+            raise RuntimeError("correct stage requires upstream 'align' or 'slice' with an existing output BED.")
 
         # --- resolve genome reference path ---
         raw_reads = getattr(cfg, "reads_file", None) or cfg.run.reads_file
@@ -60,20 +72,19 @@ class CorrectStage(StageBase):
         })
         genome = resolved["genome"]
         reads = resolved["reads"]
-        self._genome_fa_abs = str(genome)  # <-- Ensure this is set for QC
+        self._genome_fa_abs = str(genome)
 
         # --- inputs for signature ---
-        self._hash_inputs = [align_bed, genome]
+        self._hash_inputs = [bed_file, genome]
 
         # --- parse flags for this stage ---
         flag_parts, extra_inputs = self.resolve_stage_flags()
         self._hash_inputs.extend(extra_inputs)
 
         # --- include upstream signature in signature inputs ---
-        self._hash_inputs.append(align_sig)
+        self._hash_inputs.append(upstream_sig)
         self._flags_components = flag_parts
 
-        # --- warn if no extra flags were supplied ---
         if not flag_parts:
             logging.warning(
                 "No extra flags configured for correct stage; using defaults."
@@ -85,7 +96,7 @@ class CorrectStage(StageBase):
 
         cmd = [
             "flair", "correct",
-            "-q", str(align_bed),
+            "-q", str(bed_file),
             "-o", self.run_id,
             *flag_parts,
         ]

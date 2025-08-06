@@ -226,6 +226,10 @@ class StageBase(ABC):
         try:
             genome_fa = getattr(self, "_genome_fa_abs", None)
             if self.name == "correct":
+                # Only run QC if slice is NOT upstream
+                if "slice" in self.upstreams:
+                    logging.info("Skipping correct QC because slice is upstream.")
+                    return {}
                 align_sig = self.upstreams["align"].signature if "align" in self.upstreams else None
                 return qc_func(
                     primary,

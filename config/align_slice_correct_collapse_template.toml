@@ -42,7 +42,7 @@ name = "align"
 # ------------------------------------------------------------------------------------------------------------
 [[run.stages]]
 name = "slice"
-requires = ["correct"]
+requires = ["align"]
 
 [run.stages.flags]
 gtf = ""	

@@ -66,11 +66,10 @@ class SliceStage(StageBase):
 
     Source BED priority:
       1. User override via [run.stages.flags].bed
-      2. Corrected BED (if correct stage exists & file present)
-      3. Align BED
+      2. Align BED
     """
     name = "slice"
-    requires = ("align", "correct")
+    requires = ("align")
     primary_output_key = "combined_bam"
 
     def build_cmd(self):
@@ -79,17 +78,9 @@ class SliceStage(StageBase):
 
         # Determine upstream BED/BAM
         align_pb = self.upstreams.get("align")
-        correct_pb = self.upstreams.get("correct")
 
-        # Set BAM and BED defaults
-        self._align_bam = None
-        self._align_bed = None
-
-        if align_pb:
-            self._align_bam = align_pb.stage_dir / f"{self.run_id}_flair.bam"
-            self._align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
-        if correct_pb:
-            self._correct_bed = correct_pb.stage_dir / f"{self.run_id}_all_corrected.bed"
+        self._align_bam = align_pb.stage_dir / f"{self.run_id}_flair.bam"
+        self._align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
 
         flags = next(st.flags for st in cfg.run.stages if st.name == "slice")
 
@@ -105,9 +96,6 @@ class SliceStage(StageBase):
         if override_bed:
             self._bed_file = resolve_path(override_bed, data_dir=data_dir)
             self._bed_source = "override"
-        elif correct_pb and self._correct_bed.exists():
-            self._bed_file = self._correct_bed
-            self._bed_source = "corrected"
         elif self._align_bed and self._align_bed.exists():
             self._bed_file = self._align_bed
             self._bed_source = "align"

@@ -17,7 +17,7 @@
 Select one of the four supported workflows and copy its template from `configs/`:
 
 1. **Align → Correct → Collapse**
-2. **Align → Correct → Slice → Collapse**
+2. **Align → Slice → Correct → Collapse**
 3. **Align → Transcriptome** (requires **FLAIR ≥ 3.0**)
 4. **Align → Slice → Transcriptome** (requires **FLAIR ≥ 3.0**)
 
@@ -28,6 +28,7 @@ Once you have selected and copied a template, you can edit it by :
 1. Set `run_id` under `[run]` to name your output folder.
 2. Edit the six fields under `[run]`: `version`, `conda_env`, `work_dir`, `data_dir`, `reads_file`, `genome_fa`.
 3. Add any CLI flags under each `[run.stages.flags]`; leave blank to use FLAIR defaults.
+  **⚠️** Do not use -o flag
 
 4. In addition to providing input data, users should fill a description which provides reasoning as to why a test case is created. This description should be commented in the configuration file, and would include things like : 
 
