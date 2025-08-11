@@ -118,7 +118,10 @@ def main(config_input: Path):
                 break
             else:
                 upstreams[st_cfg.name] = pb
-                logging.info(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
+                if pb is not None:
+                    logging.info(f"✓ Done {st_cfg.name} – outputs: {pb.stage_dir}")
+                else:
+                    logging.warning(f"Stage {st_cfg.name} did not produce any outputs or stage_dir.")
                 if getattr(stage_instance, "action", None) != "skip":
                     all_skipped = False
                     any_ran = True

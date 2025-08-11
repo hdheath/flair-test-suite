@@ -4,95 +4,187 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import List, Tuple
 
 from .base import StageBase
-from .stage_utils import resolve_path, parse_cli_flags, get_stage_config
-
-
+from ..qc.qc_utils import count_lines  # safe to import; we won't use on BAMs
+                                       # but kept for parity if you later adapt
 class TranscriptomeStage(StageBase):
     """
-    FLAIR transcriptome stage (v3+):
-    - Consumes the sliced BAM if slice stage present, else the align BAM
-    - Runs `flair transcriptome` to detect isoforms
-    - Produces isoform BED/GTF (BED is primary output)
+    FLAIR transcriptome stage (v3+)
+
+    Modes:
+      • Regionalized path (regionalize → transcriptome):
+          - Discover per-region BAMs: {chrom}_{start}_{end}.bam (from regionalize)
+          - Run ONE `flair transcriptome` per region with -o {chrom}_{start}_{end}
+          - Outputs: {chrom}_{start}_{end}.isoforms.{bed,gtf}
+
+      • Standard path (align → transcriptome):
+          - Use {run_id}_flair.bam from align
+          - Single `flair transcriptome` with -o {run_id}
+          - Outputs: {run_id}.isoforms.{bed,gtf}
     """
     name = "transcriptome"
-    requires: tuple[str, ...] = ()  # manual upstream handling
+    requires: tuple[str, ...] = ()  # dynamic upstreams
     primary_output_key = "isoforms_bed"
 
-    def _locate_bam(self) -> tuple[Path, str]:
-        """
-        Return (bam_path, upstream_signature).
-        Priority: slice > align.
-        """
-        if "slice" in self.upstreams:
-            slice_pb = self.upstreams["slice"]
-            bam = slice_pb.stage_dir / "combined_region.bam"
-            if bam.exists():
-                return bam, slice_pb.signature
+    # cache to provide a concrete primary and light metadata
+    _mode: str | None = None
+    _region_tags: List[str] = []
+    _first_tag: str | None = None
 
+    @property
+    def tool_version(self) -> str:
+        return str(self.cfg.run.version)
+
+    # ───────────────────────── helpers ─────────────────────────
+    def _collect_bams(self) -> Tuple[List[Tuple[Path, str]], List[Path], str]:
+        """
+        Returns: ([(bam_path, tag)], [upstream_signatures], mode)
+        mode ∈ {"regionalized", "standard"}
+        """
+        pairs: List[Tuple[Path, str]] = []
+        upstream_sigs: List[Path] = []
+
+        # Prefer regionalize if present
+        if "regionalize" in self.upstreams:
+            mode = "regionalized"
+            reg_pb = self.upstreams["regionalize"]
+            upstream_sigs.append(reg_pb.signature)
+
+            details = reg_pb.stage_dir / "region_details.tsv"
+            if not details.exists():
+                raise RuntimeError(f"[transcriptome] region_details.tsv not found: {details}")
+
+            with details.open() as fh:
+                _ = next(fh, "")  # skip header
+                for raw in fh:
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) < 3:
+                        continue
+                    chrom, start, end = parts[0], parts[1], parts[2]
+                    tag = f"{chrom}_{start}_{end}"
+                    bam = reg_pb.stage_dir / f"{tag}.bam"
+                    if not bam.exists() or bam.stat().st_size == 0:
+                        logging.warning(f"[transcriptome] Missing/empty region BAM, skipping: {bam}")
+                        continue
+                    pairs.append((bam, tag))
+
+            if not pairs:
+                raise RuntimeError("[transcriptome] No non-empty per-region BAMs discovered.")
+
+            return pairs, upstream_sigs, mode
+
+        # Fallback: align
         if "align" in self.upstreams:
-            align_pb = self.upstreams["align"]
-            bam = align_pb.stage_dir / f"{self.run_id}_flair.bam"
-            if bam.exists():
-                return bam, align_pb.signature
+            mode = "standard"
+            aln_pb = self.upstreams["align"]
+            upstream_sigs.append(aln_pb.signature)
+            bam = aln_pb.stage_dir / f"{self.run_id}_flair.bam"
+            if not bam.exists() or bam.stat().st_size == 0:
+                raise RuntimeError(f"[transcriptome] Align BAM missing/empty: {bam}")
+            pairs.append((bam, self.run_id))
+            return pairs, upstream_sigs, mode
 
-        raise RuntimeError(
-            "transcriptome stage requires upstream `slice` or `align` with an existing BAM."
-        )
+        raise RuntimeError("[transcriptome] requires upstream `regionalize` or `align`.")
 
-    def build_cmd(self) -> list[str]:
+    # ─────────────────── command builder ───────────────────
+    def build_cmds(self) -> List[List[str]]:
         cfg = self.cfg
 
-        # Ensure version supports transcriptome
+        # Ensure FLAIR v3+
         flair_version = str(cfg.run.version)
         try:
-            major_version = int(flair_version.split(".")[0])
+            major = int(flair_version.split(".")[0])
         except Exception:
-            major_version = 0
-        if major_version < 3:
+            major = 0
+        if major < 3:
             raise RuntimeError(
-                f"flair transcriptome requires FLAIR >= 3.0.0; version '{flair_version}' configured."
+                f"flair transcriptome requires FLAIR >= 3.0.0; configured '{flair_version}'."
             )
 
-        bam_path, upstream_sig = self._locate_bam()
+        # Discover inputs
+        bam_pairs, upstream_sigs, mode = self._collect_bams()
+        self._mode = mode
+        self._region_tags = [t for _, t in bam_pairs]
+        self._first_tag = self._region_tags[0] if self._region_tags else None
 
-        # --- resolve genome and reads ---
-        raw_reads = getattr(cfg, "reads_file", None) or cfg.run.reads_file
+        # Resolve genome (reads not required for transcriptome)
         resolved = self.resolve_stage_inputs({
             "genome": cfg.run.genome_fa,
-            "reads": raw_reads,
         })
         genome = resolved["genome"]
-        reads = resolved["reads"]
-        self._genome_fa_abs = str(genome)  # For QC
+        self._genome_fa_abs = str(genome)
 
-        # --- parse flags and extra inputs ---
+        # Parse flags
         flag_parts, extra_inputs = self.resolve_stage_flags()
-        self._hash_inputs = [bam_path, genome, upstream_sig, *extra_inputs]
+
+        # Signature inputs: genome + all BAMs + upstream sigs + extra inputs
+        self._hash_inputs = [genome, *[bp[0] for bp in bam_pairs], *upstream_sigs, *extra_inputs]
         self._flags_components = flag_parts
 
-        if not flag_parts:
-            logging.warning(
-                "No extra flags configured for transcriptome stage; using defaults."
-            )
+        cmds: List[List[str]] = []
 
-        cmd = [
-            "flair", "transcriptome",
-            "-b", str(bam_path),
-            "-g", str(genome),
-            "-o", self.run_id,
-            *flag_parts,
-        ]
-        return cmd
+        if mode == "regionalized":
+            # One transcriptome call per region
+            for bam, tag in bam_pairs:
+                cmd = [
+                    "flair", "transcriptome",
+                    "-b", str(bam),
+                    "-g", str(genome),
+                    "-o", tag,
+                    *flag_parts,
+                ]
+                cmds.append(cmd)
+                logging.info(f"[transcriptome] Scheduled per-region transcriptome: {tag}")
+        else:
+            # Single standard call
+            bam, _ = bam_pairs[0]
+            cmd = [
+                "flair", "transcriptome",
+                "-b", str(bam),
+                "-g", str(genome),
+                "-o", self.run_id,
+                *flag_parts,
+            ]
+            cmds.append(cmd)
+            logging.info(f"[transcriptome] Scheduled standard transcriptome: {self.run_id}")
 
+        logging.debug(f"[transcriptome] mode={mode} commands={len(cmds)}")
+        return cmds
+
+    # Legacy shim
+    def build_cmd(self) -> list[str]:
+        cmds = self.build_cmds()
+        return cmds[-1] if cmds else []
+
+    # ───────────────────── expected outputs ─────────────────────
     def expected_outputs(self) -> dict[str, Path]:
-        base = self.run_id
-        return {
-            "isoforms_bed": Path(f"{base}.isoforms.bed"),
-            "isoforms_gtf": Path(f"{base}.isoforms.gtf")
-        }
+        """
+        Provide a CONCRETE primary so Reinstate can test existence.
+        - Regionalized: first region tag’s isoforms.bed
+        - Standard: run_id.isoforms.bed
+        """
+        if "regionalize" in self.upstreams:
+            first = self._first_tag or f"{self.run_id}"
+            return {
+                "isoforms_bed": Path(f"{first}.isoforms.bed"),
+                "isoforms_gtf": Path(f"{first}.isoforms.gtf"),
+                # (human hint only) pattern for the rest:
+                "isoforms_bed_pattern": Path("{chrom}_{start}_{end}.isoforms.bed"),
+            }
+        else:
+            base = self.run_id
+            return {
+                "isoforms_bed": Path(f"{base}.isoforms.bed"),
+                "isoforms_gtf": Path(f"{base}.isoforms.gtf"),
+            }
 
+    # No registered QC collector by default; keep hook minimal
     def collect_qc(self, pb):
         return {}
+
 

@@ -323,90 +323,110 @@ def _try_plot_parcoords(
 
 # ───────────────────────── main collector ───────────────────────────────
 
-@register("slice")
+@register("regionalize")
 def collect(
     manifest: Path,
     out_dir: Path,
     runtime_sec: float | None = None
 ) -> dict:
     """
-    QC collector for combined SliceStage outputs.
-
-    Arguments:
-      manifest    : Path to slice manifest TSV
-      out_dir     : Directory containing slice outputs
-      runtime_sec : Time taken by the slice stage (seconds)
-
-    Returns:
-      Dict of overall slice QC metrics.
+    QC collector for per-region RegionalizeStage outputs.
+    Processes each region's BED/GTF and reports metrics per region.
     """
+    import pandas as pd
+    import csv, time, warnings
+
     t0 = time.time()
-    if not manifest.exists():
-        raise FileNotFoundError(f"Missing slice manifest: {manifest}")
+    details_path = out_dir / "region_details.tsv"
+    if not details_path.exists():
+        raise FileNotFoundError(f"Missing region details: {details_path}")
 
-    # 1) Build region detail file with span
-    regions: List[Dict[str, Any]] = []
-    with open(manifest) as fh:
-        next(fh)  # skip header
-        for L in fh:
-            chrom, s_s, e_s = L.rstrip("\n").split("\t")[:3]
-            try:
-                s_i, e_i = int(s_s), int(e_s)
-            except ValueError:
-                continue
-            regions.append({"chrom": chrom, "start": s_i, "end": e_i,
-                            "span_bp": e_i - s_i + 1})
-    if regions:
-        with open(out_dir/"slice_region_details.tsv", "w", newline="") as fh:
-            w = csv.DictWriter(fh, fieldnames=regions[0].keys(), delimiter="\t")
-            w.writeheader(); w.writerows(regions)
+    regions = pd.read_csv(details_path, sep="\t")
+    region_metrics = []
 
-    # 2) Summarise combined_region.gtf into gene/transcript CSVs
-    gtf = out_dir/"combined_region.gtf"
-    gene_rows, tx_rows = [], []
-    if gtf.exists():
-        gene_rows, tx_rows = _summarise_gtf(gtf)
-        if gene_rows:
-            with open(out_dir/"gene_summary.csv", "w", newline="") as fh:
-                w = csv.DictWriter(fh, fieldnames=gene_rows[0].keys())
-                w.writeheader(); w.writerows(gene_rows)
-        if tx_rows:
-            with open(out_dir/"transcript_summary.csv", "w", newline="") as fh:
-                w = csv.DictWriter(fh, fieldnames=tx_rows[0].keys())
-                w.writeheader(); w.writerows(tx_rows)
-    else:
-        warnings.warn("No combined_region.gtf – skipping summaries", UserWarning)
+    for _, reg in regions.iterrows():
+        chrom, start, end = reg["chrom"], reg["start"], reg["end"]
+        region_tag = f"{chrom}_{start}_{end}"
 
-    # 3) Compute per-region metrics and augment with line counts
-    region_metrics_path = out_dir/"region_metrics.tsv"
-    if regions and gene_rows and tx_rows:
-        reg_rows, num_cols = _compute_region_metrics(
-            out_dir/"slice_region_details.tsv",
-            out_dir/"gene_summary.csv",
-            out_dir/"transcript_summary.csv"
-        )
-        bed_f = out_dir/"combined_region.bed"
-        jx_f  = out_dir/"combined_region.junctions"
-        for r in reg_rows:
-            chrom, rng = r["region_id"].split(":")
-            s,e = map(int, rng.split("-"))
-            r["bed_lines"]      = _count_lines_for_region(bed_f, chrom, s, e, 1, 2, True)
-            r["junction_lines"] = _count_lines_for_region(jx_f,  chrom, s, e, 2, 3, False)
-        if reg_rows:
-            with open(region_metrics_path, "w", newline="") as fh:
-                w = csv.DictWriter(fh, fieldnames=reg_rows[0].keys(), delimiter="\t")
-                w.writeheader(); w.writerows(reg_rows)
-            # 4) Plot parallel-coordinates across regions
-            _try_plot_parcoords(out_dir, region_metrics_path, num_cols)
+        bed = out_dir / f"{region_tag}.bed"
+        gtf = out_dir / f"{region_tag}.gtf"
+        fa  = out_dir / f"{region_tag}.fa"
 
-    # 5) Final QC metrics write
-    metrics: Dict[str, Any] = {
-        "region_count":     len(regions),
-        "gene_count":       len(gene_rows),
-        "transcript_count": len(tx_rows),
-        "qc_runtime_sec":   round(time.time() - t0, 2),
+        # Compute metrics for this region
+        gene_count = transcript_count = exon_count = 0
+        biotypes = Counter()
+        if gtf.exists():
+            gene_rows, tx_rows = _summarise_gtf(gtf)
+            gene_count = len(gene_rows)
+            transcript_count = len(tx_rows)
+            for tx in tx_rows:
+                bt = tx.get("transcript_biotype", "")
+                if bt: biotypes[bt] += 1
+            exon_count = sum(tx.get("exon_count", 0) for tx in tx_rows)
+
+            # --- Write per-region summaries ---
+            gene_csv = out_dir / f"{region_tag}_gene_summary.csv"
+            tx_csv = out_dir / f"{region_tag}_transcript_summary.csv"
+            if gene_rows:
+                with open(gene_csv, "w", newline="") as fh:
+                    w = csv.DictWriter(fh, fieldnames=gene_rows[0].keys())
+                    w.writeheader()
+                    w.writerows(gene_rows)
+            if tx_rows:
+                with open(tx_csv, "w", newline="") as fh:
+                    w = csv.DictWriter(fh, fieldnames=tx_rows[0].keys())
+                    w.writeheader()
+                    w.writerows(tx_rows)
+        else:
+            warnings.warn(f"No GTF for region {region_tag}", UserWarning)
+
+        # Optionally, count lines in BED
+        bed_lines = _count_lines_for_region(bed, chrom, start, end, 1, 2, True) if bed.exists() else 0
+
+        region_metrics.append({
+            "region_tag": region_tag,
+            "chrom": chrom,
+            "start": start,
+            "end": end,
+            "span_bp": reg["span_bp"],
+            "gene_count": gene_count,
+            "transcript_count": transcript_count,
+            "exon_count": exon_count,
+            "bed_lines": bed_lines,
+            **{f"biotype_{bt}": biotypes[bt] for bt in biotypes}
+        })
+
+    # Collect all biotype keys across regions
+    all_biotype_keys = set()
+    for row in region_metrics:
+        all_biotype_keys.update(k for k in row if k.startswith("biotype_"))
+
+    # Build full fieldnames list
+    base_keys = [
+        "region_tag", "chrom", "start", "end", "span_bp",
+        "gene_count", "transcript_count", "exon_count", "bed_lines"
+    ]
+    keys = base_keys + sorted(all_biotype_keys)
+
+    # Fill missing biotype columns with 0
+    for row in region_metrics:
+        for k in all_biotype_keys:
+            if k not in row:
+                row[k] = 0
+
+    # Write per-region metrics
+    metrics_path = out_dir / "region_metrics.tsv"
+    with open(metrics_path, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=keys, delimiter="\t")
+        w.writeheader()
+        w.writerows(region_metrics)
+
+    # Final summary metrics
+    metrics = {
+        "region_count": len(region_metrics),
+        "qc_runtime_sec": round(time.time() - t0, 2),
     }
     if runtime_sec is not None:
-        metrics["slice_runtime_sec"] = round(runtime_sec, 2)
-    write_metrics(out_dir, "slice_region", metrics)
+        metrics["regionalize_runtime_sec"] = round(runtime_sec, 2)
+    write_metrics(out_dir, "regionalize", metrics)
     return metrics

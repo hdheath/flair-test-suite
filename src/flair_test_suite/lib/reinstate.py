@@ -39,6 +39,7 @@ class Reinstate:
         "run"   – otherwise run the external tool
         """
         marker_f = stage_dir / ".completed.json"
+        qc_tsv   = qc_sidecar_path(stage_dir, stage_name)
         marker_ok = marker_f.exists()
         primary_ok = primary.exists()
 
@@ -49,6 +50,12 @@ class Reinstate:
             qc_ok = qc_tsv.exists()
         else:
             qc_ok = True
+
+        print(f"[Reinstate] Stage: {stage_name}")
+        print(f"  Marker: {marker_f} exists? {marker_ok}")
+        print(f"  Primary: {primary} exists? {primary_ok}")
+        print(f"  QC: {qc_tsv} exists? {qc_ok}")
+        print(f"  All files in {stage_dir}: {list(stage_dir.iterdir())}")
 
         if marker_ok and primary_ok and qc_ok:
             return "skip"

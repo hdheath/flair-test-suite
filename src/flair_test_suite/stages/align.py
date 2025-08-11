@@ -110,3 +110,7 @@ class AlignStage(StageBase):
     # QC is invoked automatically by StageBase if a collector is registered
     def collect_qc(self, pb):
         return {}  # no-op here; actual QC logic lives in qc/align_qc.py
+
+    def build_cmds(self) -> list[list[str]] | None:
+        """Return None as AlignStage uses a single command."""
+        return None
