@@ -32,7 +32,13 @@ class StageBase(ABC):
     requires: tuple[str, ...] = ()
     primary_output_key: str = "bam"
 
-    def __init__(self, cfg, run_id: str, work_dir: Path, upstreams: Dict[str, PathBuilder] | None = None):
+    def __init__(
+        self,
+        cfg,
+        run_id: str,
+        work_dir: Path,
+        upstreams: Dict[str, PathBuilder] | None = None,
+    ):
         self.cfg = cfg
         self.run_id = run_id
         self.work_dir = work_dir
@@ -241,6 +247,11 @@ class StageBase(ABC):
         with open(log_path, "w") as logf:
             proc = subprocess.run(full_cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=cwd)
         if proc.returncode != 0:
-            logging.error(f"[{self.name}] Command failed: {' '.join(full_cmd)} (exit {proc.returncode})")
-            raise RuntimeError(f"{self.name} failed with exit code {proc.returncode}")
+            logging.error(
+                f"[{self.name}] Command failed: {' '.join(full_cmd)} "
+                f"(exit {proc.returncode})"
+            )
+            raise RuntimeError(
+                f"{self.name} failed with exit code {proc.returncode}"
+            )
         return proc.returncode

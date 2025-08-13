@@ -6,20 +6,13 @@
 
 from __future__ import annotations
 
-import warnings          # to emit runtime warnings about config or file issues
 import subprocess        # to invoke external commands
+import logging
 from pathlib import Path # for filesystem paths
 
 from .base import StageBase       # base class providing orchestration logic
-from ..lib.input_hash import hash_many  # to hash input files
 
-
-from .stage_utils import (
-    count_reads,
-    resolve_path,
-    parse_cli_flags,
-    get_stage_config
-)
+from .stage_utils import count_reads
 
 class AlignStage(StageBase):
     """
@@ -85,16 +78,6 @@ class AlignStage(StageBase):
     def tool_version(self) -> str:
         """Return the cached tool version or a default string."""
         return getattr(self, "_tool_version", "flair-unknown")
-
-    @property
-    def flags_str(self) -> str:
-        """Stringify flags for signature calculation."""
-        return " ".join(getattr(self, "_flags_components", []))
-
-    @property
-    def input_hashes(self) -> list[str]:
-        """Apply hash_many() to the list of input Paths."""
-        return hash_many(getattr(self, "_hash_inputs", []))
 
     def expected_outputs(self) -> dict[str, Path]:
         """
