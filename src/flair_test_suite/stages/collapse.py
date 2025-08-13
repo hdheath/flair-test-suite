@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .base import StageBase
-from ..lib.input_hash import hash_many
 from ..qc.qc_utils import count_lines
-from ..qc import write_metrics 
+from ..qc import write_metrics
+from .stage_utils import read_region_details
 ...
 # Force-load TED QC so Reinstate knows transcriptome has QC
 try:
@@ -54,25 +54,20 @@ class CollapseStage(StageBase):
             if not details.exists():
                 raise RuntimeError(f"Expected region_details.tsv not found: {details}")
 
-            with details.open() as fh:
-                _ = next(fh, "")  # skip header
-                for raw in fh:
-                    line = raw.strip()
-                    if not line:
-                        continue
-                    parts = line.split("\t")
-                    if len(parts) < 3:
-                        continue
-                    chrom, start, end = parts[0], parts[1], parts[2]
-                    tag = f"{chrom}_{start}_{end}"
-                    bed = corr_dir / f"{tag}_all_corrected.bed"
-                    if not bed.exists():
-                        logging.warning(f"[collapse] Missing corrected BED for region, skipping: {bed}")
-                        continue
-                    if bed.stat().st_size == 0 or count_lines(bed) == 0:
-                        logging.warning(f"[collapse] Empty corrected BED, skipping: {bed}")
-                        continue
-                    pairs.append((bed, tag))
+            for chrom, start, end in read_region_details(details):
+                tag = f"{chrom}_{start}_{end}"
+                bed = corr_dir / f"{tag}_all_corrected.bed"
+                if not bed.exists():
+                    logging.warning(
+                        f"[collapse] Missing corrected BED for region, skipping: {bed}"
+                    )
+                    continue
+                if bed.stat().st_size == 0 or count_lines(bed) == 0:
+                    logging.warning(
+                        f"[collapse] Empty corrected BED, skipping: {bed}"
+                    )
+                    continue
+                pairs.append((bed, tag))
         else:
             mode = "standard"
             bed = corr_dir / f"{self.run_id}_all_corrected.bed"
@@ -109,7 +104,13 @@ class CollapseStage(StageBase):
         if "--generate_map" not in flag_parts:
             flag_parts.append("--generate_map")
 
-        self._hash_inputs = [genome, *reads, *[bp[0] for bp in bed_pairs], *upstream_sigs, *extra_inputs]
+        self._hash_inputs = [
+            genome,
+            *reads,
+            *[bp[0] for bp in bed_pairs],
+            *upstream_sigs,
+            *extra_inputs,
+        ]
         self._flags_components = flag_parts
 
         cmds: List[List[str]] = []

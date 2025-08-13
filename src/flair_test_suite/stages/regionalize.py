@@ -190,7 +190,12 @@ class RegionalizeStage(StageBase):
 
         return cmds
 
-    def run_tool(self, cmd: list[str], log_path: Path | None = None, cwd: Path | None = None) -> int:
+    def run_tool(
+        self,
+        cmd: list[str],
+        log_path: Path | None = None,
+        cwd: Path | None = None,
+    ) -> int:
         """Run commands exactly as given (no conda), logging to tool.log."""
 
         log_path = log_path or Path("tool.log")
@@ -205,15 +210,6 @@ class RegionalizeStage(StageBase):
             raise RuntimeError(f"{self.name} failed with exit code {proc.returncode}")
         return proc.returncode
 
-
-        logging.info(f"[{self.name}] Running (no conda): {' '.join(cmd)}")
-        with open(log_path, "a") as logf:
-            proc = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=cwd)
-
-        if proc.returncode != 0:
-            logging.error(f"[{self.name}] Command failed (exit {proc.returncode}): {' '.join(cmd)}")
-            raise RuntimeError(f"{self.name} failed with exit code {proc.returncode}")
-        return proc.returncode
 
     # for legacy callers
     def build_cmd(self) -> List[str]:

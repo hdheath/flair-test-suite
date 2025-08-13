@@ -4,12 +4,8 @@ import logging
 from pathlib import Path
 from typing import List, Tuple
 
-import pandas as pd
-
 from .base import StageBase
-from .stage_utils import parse_cli_flags, get_stage_config
-from ..lib.paths import PathBuilder
-from ..lib.input_hash import hash_many
+from .stage_utils import read_region_details
 from ..qc.correct_qc import run_qc
 from ..qc import write_metrics
 from ..qc.qc_utils import count_lines
@@ -51,13 +47,15 @@ class CorrectStage(StageBase):
             upstream_sig = reg_pb.signature
             details_path = reg_pb.stage_dir / "region_details.tsv"
             if not details_path.exists():
-                raise RuntimeError(f"Expected region_details.tsv not found: {details_path}")
-            regions = pd.read_csv(details_path, sep="\t")
-            for _, reg in regions.iterrows():
-                chrom, start, end = reg["chrom"], reg["start"], reg["end"]
+                raise RuntimeError(
+                    f"Expected region_details.tsv not found: {details_path}"
+                )
+            for chrom, start, end in read_region_details(details_path):
                 bed_file = reg_pb.stage_dir / f"{chrom}_{start}_{end}.bed"
                 if not bed_file.exists():
-                    raise RuntimeError(f"Expected region output BED not found: {bed_file}")
+                    raise RuntimeError(
+                        f"Expected region output BED not found: {bed_file}"
+                    )
                 self._bed_files.append((bed_file, f"{chrom}_{start}_{end}"))
         elif "align" in self.upstreams:
             aln_pb = self.upstreams["align"]
@@ -87,7 +85,11 @@ class CorrectStage(StageBase):
         cmds: List[List[str]] = []
         for bed_file, region_tag in self._bed_files:
             # hard skip empties (zero bytes OR zero records)
-            if (not bed_file.exists()) or (bed_file.stat().st_size == 0) or (count_lines(bed_file) == 0):
+            if (
+                (not bed_file.exists())
+                or (bed_file.stat().st_size == 0)
+                or (count_lines(bed_file) == 0)
+            ):
                 logging.warning(f"[correct] Skipping empty BED: {bed_file}")
                 continue
 

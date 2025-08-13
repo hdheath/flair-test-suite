@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .base import StageBase
-from ..qc.qc_utils import count_lines  # safe to import; we won't use on BAMs
-                                       # but kept for parity if you later adapt
+from .stage_utils import read_region_details
 class TranscriptomeStage(StageBase):
     """
     FLAIR transcriptome stage (v3+)
@@ -54,24 +53,19 @@ class TranscriptomeStage(StageBase):
 
             details = reg_pb.stage_dir / "region_details.tsv"
             if not details.exists():
-                raise RuntimeError(f"[transcriptome] region_details.tsv not found: {details}")
+                raise RuntimeError(
+                    f"[transcriptome] region_details.tsv not found: {details}"
+                )
 
-            with details.open() as fh:
-                _ = next(fh, "")  # skip header
-                for raw in fh:
-                    line = raw.strip()
-                    if not line:
-                        continue
-                    parts = line.split("\t")
-                    if len(parts) < 3:
-                        continue
-                    chrom, start, end = parts[0], parts[1], parts[2]
-                    tag = f"{chrom}_{start}_{end}"
-                    bam = reg_pb.stage_dir / f"{tag}.bam"
-                    if not bam.exists() or bam.stat().st_size == 0:
-                        logging.warning(f"[transcriptome] Missing/empty region BAM, skipping: {bam}")
-                        continue
-                    pairs.append((bam, tag))
+            for chrom, start, end in read_region_details(details):
+                tag = f"{chrom}_{start}_{end}"
+                bam = reg_pb.stage_dir / f"{tag}.bam"
+                if not bam.exists() or bam.stat().st_size == 0:
+                    logging.warning(
+                        f"[transcriptome] Missing/empty region BAM, skipping: {bam}"
+                    )
+                    continue
+                pairs.append((bam, tag))
 
             if not pairs:
                 raise RuntimeError("[transcriptome] No non-empty per-region BAMs discovered.")

@@ -84,7 +84,10 @@ def parse_cli_flags(
                 _push(k, p)
                 extra_inputs.append(p)
             else:
-                logging.warning(f"Flag '{k}' value '{v}' does not resolve to an existing file. Treating as option.")
+                logging.warning(
+                    f"Flag '{k}' value '{v}' does not resolve to an existing file."
+                    " Treating as option."
+                )
                 _push(k, v)
         else:
             logging.warning(f"Flag '{k}' has an unrecognized type ({type(v)}). Treating as option.")
@@ -126,6 +129,28 @@ def filter_file_by_regions(src: Path, out: Path, lookup, filetype: str):
                 kept += 1
     if kept == 0:
         logging.warning(f"{out.name} empty after filtering")
+
+
+def read_region_details(tsv: Path) -> List[tuple[str, str, str]]:
+    """Parse region_details.tsv into a list of (chrom, start, end)."""
+    regions: List[tuple[str, str, str]] = []
+    with tsv.open() as fh:
+        next(fh, None)  # skip header
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 3:
+                logging.warning(
+                    f"{tsv.name} line {len(regions) + 2}: fewer than 3 columns"
+                )
+                continue
+            chrom, start, end = parts[0], parts[1], parts[2]
+            regions.append((chrom, start, end))
+    if not regions:
+        raise RuntimeError(f"No regions parsed from {tsv}")
+    return regions
 
 def get_stage_config(cfg, name):
     """
