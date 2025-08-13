@@ -4,7 +4,7 @@
 # Requirements:
 #  • Python standard library: csv, time, warnings, statistics, collections
 #  • pathlib, typing
-#  • qc_utils: count_lines
+#  • qc_utils: count_lines, parse_gtf_attributes
 #  • pipeline QC helpers: register, write_metrics
 #  • Optional for plots: pandas, numpy, plotly, scipy (install via mamba)
 # Summary:
@@ -20,8 +20,6 @@
 # Functions:
 #   collect(manifest, out_dir, runtime_sec)
 #       Main entry: orchestrates all QC steps for slice stage.
-#   _parse_attrs(attr_col)
-#       Parse GTF attribute column into dict.
 #   _stream_gtf(gtf)
 #       Yield non-header GTF fields as lists.
 #   _summarise_gtf(gtf)
@@ -40,26 +38,14 @@ import warnings
 from collections import defaultdict, Counter
 from pathlib import Path
 from statistics import mean, median
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Iterator
 
 from . import register, write_metrics  # QC registry and output helper
-from .qc_utils import count_lines  # simple line counting utility
+from .qc_utils import count_lines, parse_gtf_attributes  # shared QC utilities
 
 __all__ = ["collect"]
 
 # ───────────────────────── GTF helpers ────────────────────────────────
-
-def _parse_attrs(attr_col: str) -> Dict[str, str]:
-    """
-    Convert a GTF attribute column into a key->value dict.
-    """
-    out: Dict[str, str] = {}
-    for chunk in attr_col.rstrip(";").split(";"):
-        chunk = chunk.strip()
-        if chunk and " " in chunk:
-            k, v = chunk.split(" ", 1)
-            out[k] = v.strip('"')
-    return out
 
 
 def _stream_gtf(gtf: Path) -> Iterator[List[str]]:
@@ -96,7 +82,7 @@ def _summarise_gtf(gtf: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]
             s_i, e_i = int(s_s), int(e_s)
         except ValueError:
             continue
-        at = _parse_attrs(attrs)
+        at = parse_gtf_attributes(attrs)
         tid = at.get("transcript_id")
         gid = at.get("gene_id")
 
