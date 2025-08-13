@@ -23,7 +23,7 @@
 from __future__ import annotations
 from pathlib import Path
 import subprocess
-from typing import Iterator
+from typing import Dict, Iterator
 
 import pysam
 from collections import Counter, defaultdict
@@ -33,6 +33,7 @@ import itertools
 __all__ = [
     "count_lines",
     "percent",
+    "parse_gtf_attributes",
     "iter_primary",
     "count_unique_junctions",
     "SAMPLE_LIMIT",
@@ -61,6 +62,28 @@ def percent(numerator: int, denominator: int, digits: int = 2) -> float:
     if denominator == 0:
         return 0.0
     return round(100 * numerator / denominator, digits)
+
+
+def parse_gtf_attributes(attr_col: str) -> Dict[str, str]:
+    """Return a dictionary mapping GTF attribute keys to values.
+
+    Parameters
+    ----------
+    attr_col : str
+        Raw attribute column from a GTF line, e.g. 'gene_id "g1"; transcript_id "t1";'
+
+    Returns
+    -------
+    Dict[str, str]
+        Mapping of attribute names to unquoted string values.
+    """
+    attrs: Dict[str, str] = {}
+    for chunk in attr_col.rstrip(";").split(";"):
+        chunk = chunk.strip()
+        if chunk and " " in chunk:
+            k, v = chunk.split(" ", 1)
+            attrs[k] = v.strip('"')
+    return attrs
 
 # ------------------------------------------------------------------
 # Streaming helper for large BAMs ----------------------------------
