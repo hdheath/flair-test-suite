@@ -103,7 +103,9 @@ def _vectorized_overlap_counts(bed_df: pd.DataFrame, peaks_df: pd.DataFrame, win
     """Return (#peaks matched by ≥1 isoform within window, total peaks)."""
     consumed = np.zeros(len(peaks_df), dtype=bool)
     for (c, s), chunk in bed_df.groupby(["Chrom", "Strand"], sort=False):
-        mask = (peaks_df["Chrom"] == c) & (peaks_df["Strand"] == s)
+        mask = (peaks_df["Chrom"] == c) & (
+            (peaks_df["Strand"] == s) | (peaks_df["Strand"] == ".")
+        )
         idxs = np.flatnonzero(mask)
         if idxs.size == 0:
             continue
@@ -384,6 +386,7 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
 # ────────────────────────── main collector ──────────────────────────
 @register("TED")
 @register("collapse")
+@register("transcriptome")
 def collect(stage_dir: Path, cfg) -> None:
     """
     Writes:

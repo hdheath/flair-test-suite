@@ -11,7 +11,7 @@ from flair_test_suite import qc
 
 
 def test_qc_registry_has_expected_collectors():
-    expected = {"align", "correct", "regionalize", "ted"}
+    expected = {"align", "correct", "regionalize", "ted", "transcriptome"}
     assert expected <= set(qc.QC_REGISTRY)
     for func in qc.QC_REGISTRY.values():
         assert callable(func)
