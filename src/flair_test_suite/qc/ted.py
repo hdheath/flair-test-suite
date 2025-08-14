@@ -415,7 +415,12 @@ def collect(stage_dir: Path, cfg) -> None:
                 cur = cur.get(k, {}) if isinstance(cur, dict) else {}
             return cur if cur != {} else default
 
-    data_dir = Path(_cfg_get(["run", "data_dir"], "."))
+    data_dir_cfg = Path(_cfg_get(["run", "data_dir"], "."))
+    if data_dir_cfg.is_absolute():
+        data_dir = data_dir_cfg
+    else:
+        repo_root = stage_dir.parent.parent.parent
+        data_dir = (repo_root / data_dir_cfg).resolve()
     logging.debug(f"[TED] Data directory set to: {data_dir}")
 
     # Optional QC block
