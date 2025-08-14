@@ -28,6 +28,7 @@ Features:
 import json
 import argparse
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -215,12 +216,16 @@ def _parse_region(region: Optional[str]) -> Optional[Tuple[str, int, int]]:
     """Parse a region string like 'chr1:100-200' into a tuple."""
     if not region:
         return None
-    try:
-        chrom, start, end = region.replace(":", "\t").replace("-", "\t").split("\t")
-        start_i, end_i = int(start), int(end)
-    except Exception:
+
+    # Accept chromosome names containing dashes or other characters by using
+    # a regex instead of blindly replacing '-' characters. This ensures that
+    # contigs such as ``chr1_random-2`` are parsed correctly.
+    m = re.match(r"^([^:]+):(\d+)-(\d+)$", region.replace(",", ""))
+    if not m:
         logging.warning(f"Could not parse region string: {region}")
         return None
+    chrom, start_s, end_s = m.groups()
+    start_i, end_i = int(start_s), int(end_s)
     if end_i - start_i >= 20000:
         logging.warning("Region length >= 20000bp; skipping plot")
         return None
