@@ -268,7 +268,9 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     with pysam.AlignmentFile(bam, "rb") as bf:
         iterator = bf.fetch(*region_tuple) if region_tuple else bf.fetch()
         for rd in iterator:
-            if rd.is_unmapped:
+            # Only consider primary alignments. Secondary or supplementary
+            # alignments can misrepresent coverage and should not be plotted.
+            if rd.is_unmapped or rd.is_secondary or rd.is_supplementary:
                 continue
             blks = rd.get_blocks()
             if not blks:
@@ -491,8 +493,13 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     all_rows = row_assign + [r for rows in collapsed.values() for r in rows]
     y_lo     = min(all_rows) - new_h/2 - 1
     old_y_hi = max(gene_y.values()) + gene_h/2 + lab + 10
-    x_lo     = rs - (re_ - rs)*0.05
-    x_hi     = re_ + (re_ - rs)*0.05
+
+    # Determine horizontal span using both gene annotations and read extents.
+    span_min = min(rs, read_min)
+    span_max = max(re_, read_max)
+    x_pad    = (span_max - span_min) * 0.05
+    x_lo     = span_min - x_pad
+    x_hi     = span_max + x_pad
 
     # build per-isoform weighted TSS/TTS
     tss_pos, tss_w = [], []
@@ -533,14 +540,15 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
 
     # ── binned histogram + smoothing in bottom box (TSS) ──
     # bottom box: plot TTS histogram
-    counts_tts, edges_tts = np.histogram(tts_pos, bins=200, weights=tts_w)
+    hist_range = (span_min, span_max)
+    counts_tts, edges_tts = np.histogram(tts_pos, bins=200, weights=tts_w, range=hist_range)
     smoothed_tts = np.convolve(counts_tts, np.ones(5) / 5, mode='same')
     if smoothed_tts.max() > 0:
         smoothed_tts /= smoothed_tts.max()
     ax.add_collection(rects_from_bins(edges_tts, smoothed_tts, y1, rect_h, 'red'))
 
     # top box: plot TSS histogram
-    counts_tss, edges_tss = np.histogram(tss_pos, bins=200, weights=tss_w)
+    counts_tss, edges_tss = np.histogram(tss_pos, bins=200, weights=tss_w, range=hist_range)
     smoothed_tss = np.convolve(counts_tss, np.ones(5) / 5, mode='same')
     if smoothed_tss.max() > 0:
         smoothed_tss /= smoothed_tss.max()
