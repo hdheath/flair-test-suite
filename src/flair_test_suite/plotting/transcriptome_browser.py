@@ -137,19 +137,30 @@ def main():
     fig_w        = cfg.get('fig_width', 12)
     os.makedirs(outdir, exist_ok=True)
 
-    # load reads
+    # load genes to determine region
+    gtf_df = load_gtf(gtf)
+    if gtf_df.empty:
+        warnings.warn("No genes.")
+        return
+    contig = gtf_df.chr.iloc[0]
+    rs = int(gtf_df.start.min())
+    re_ = int(gtf_df.end.max())
+
+    # load reads restricted to region
     reads_blocks, reads_introns, read_strands, read_names = [], [], [], []
     bf = pysam.AlignmentFile(bam, 'rb')
-    for rd in bf.fetch():
-        if rd.is_unmapped: continue
+    for rd in bf.fetch(contig, rs, re_):
+        if rd.is_unmapped:
+            continue
         blks = rd.get_blocks()
-        if not blks: continue
+        if not blks:
+            continue
         reads_blocks.append(blks)
         reads_introns.append([(blks[i][1], blks[i+1][0]) for i in range(len(blks)-1)])
         read_strands.append('-' if rd.is_reverse else '+')
         read_names.append(rd.query_name)
     if not reads_blocks:
-        warnings.warn("No reads loaded.")
+        warnings.warn("No reads loaded in region.")
         return
 
     all_starts = [b[0] for blks in reads_blocks for b in blks]
@@ -243,11 +254,8 @@ def main():
     row_assign=[tot-1-r for r in row_assign]
     collapsed={iso:tuple(tot-1-r for r in rows) for iso,rows in collapsed.items()}
 
-    gtf_df=load_gtf(gtf)
-    if gtf_df.empty:
-        warnings.warn("No genes.");return
-    contig,rs,re_=(gtf_df.chr.iloc[0],int(gtf_df.start.min()),int(gtf_df.end.max()))
-    gb_buffered=[(max(0,s-5),e+5) for s,e in zip(gtf_df.start,gtf_df.end)]
+    # genes already loaded above: gtf_df, contig, rs, re_
+    gb_buffered = [(max(0, s - 5), e + 5) for s, e in zip(gtf_df.start, gtf_df.end)]
     rg,gn=assign_read_rows([[b] for b in gb_buffered])
     lab, gsp = gene_h*0.3, gene_h*7
     gbase=max(row_assign)+2
