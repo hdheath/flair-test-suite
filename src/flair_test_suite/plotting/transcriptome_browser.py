@@ -476,8 +476,7 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
                 ce = max(reads_blocks[j][-1][1] for j in idxs)
             w = ce - cs
             idxs = iso_to_idxs[iso]
-            left = min(reads_blocks[j][0][0] for j in idxs)
-            right = max(reads_blocks[j][-1][1] for j in idxs)
+            rng_left, rng_right = cs, ce
             ax.add_patch(Rectangle((cs, s1 - rh/2), w, rh, facecolor='none', edgecolor='none', zorder=1))
             blks_iso = iso_blocks.get(iso, [(cs, ce)])
             for bs, be in blks_iso:
@@ -487,11 +486,12 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
             if intr:
                 ax.add_collection(LineCollection([((a, br), (b, br)) for a, b in intr],
                                                  colors='black', linewidths=0.5, zorder=3))
-            ax.add_patch(Rectangle((left, s2 - new_h/2), right - left, new_h*5, facecolor='none', edgecolor='none', zorder=2))
-            ax.add_patch(Rectangle((left, er  - new_h/2), right - left, new_h,   facecolor='none', edgecolor='black', linewidth=0.1, zorder=2))
-            ax.add_patch(Rectangle((left, s3 - new_h/2), right - left, new_h,   facecolor='none', edgecolor='none',  zorder=2))
-            ax.add_patch(Rectangle((left, e2  - new_h/2), right - left, new_h,   facecolor='none', edgecolor='black', linewidth=0.1, zorder=2))
-            ax.add_patch(Rectangle((left, s4 - new_h/2), right - left, new_h,   facecolor='none', edgecolor='none',  zorder=2))
+            span_w = rng_right - rng_left
+            ax.add_patch(Rectangle((rng_left, s2 - new_h/2), span_w, new_h*5, facecolor='none', edgecolor='none', zorder=2))
+            ax.add_patch(Rectangle((rng_left, er  - new_h/2), span_w, new_h,   facecolor='none', edgecolor='black', linewidth=0.1, zorder=2))
+            ax.add_patch(Rectangle((rng_left, s3 - new_h/2), span_w, new_h,   facecolor='none', edgecolor='none',  zorder=2))
+            ax.add_patch(Rectangle((rng_left, e2  - new_h/2), span_w, new_h,   facecolor='none', edgecolor='black', linewidth=0.1, zorder=2))
+            ax.add_patch(Rectangle((rng_left, s4 - new_h/2), span_w, new_h,   facecolor='none', edgecolor='none',  zorder=2))
 
             if cfg.iso_kde and len(idxs) >= 2:
                 tis, tts = [], []
@@ -501,7 +501,7 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
                         tis.append(s); tts.append(e)
                     else:
                         tis.append(e); tts.append(s)
-                bins = np.linspace(left, right, 300)
+                bins = np.linspace(rng_left, rng_right, 300)
                 bw = bins[1] - bins[0]
                 if len(set(tis)) > 1:
                     h = gaussian_kde(tis)(bins); h /= h.max()
@@ -513,7 +513,7 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
                     for xval, hval in zip(bins, h):
                         ax.add_patch(Rectangle((xval, e2 - new_h/2), bw, hval * new_h,
                                                facecolor=iso_colors[iso], edgecolor='none', alpha=0.6, zorder=4))
-            label_x = left - (right - left) * 0.005
+            label_x = rng_left - (rng_right - rng_left) * 0.005
             ax.text(label_x, er, 'TSS', ha='right', va='center', rotation=90, fontsize=3, color='black', alpha=0.7, zorder=5)
             ax.text(label_x, e2, 'TTS', ha='right', va='center', rotation=90, fontsize=3, color='black', alpha=0.7, zorder=5)
             drawn.add(iso)
@@ -581,12 +581,12 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     y_gene_top      = max(gene_y.values()) + gene_h/2
     y1 = y_gene_top + spacing_to_gene
     y2 = y1 + rect_h + spacing_between
-    width = read_max - read_min
+    width = span_max - span_min
 
     # draw empty rectangles (reference boxes)
-    ax.add_patch(Rectangle((read_min, y1), width, rect_h,
+    ax.add_patch(Rectangle((span_min, y1), width, rect_h,
                            facecolor='none', edgecolor='black', linewidth=0.5, zorder=2))
-    ax.add_patch(Rectangle((read_min, y2), width, rect_h,
+    ax.add_patch(Rectangle((span_min, y2), width, rect_h,
                            facecolor='none', edgecolor='black', linewidth=0.5, zorder=2))
 
     # ── binned histogram + smoothing in bottom box (TTS) ──
@@ -605,7 +605,7 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     ax.add_collection(rects_from_bins(edges_tss, smoothed_tss, y2, rect_h, 'blue'))
 
     # external labels: TTS on bottom, TSS on top
-    x_lbl = read_min - width * 0.001
+    x_lbl = span_min - width * 0.001
     y1c  = y1 + rect_h/2
     y2c  = y2 + rect_h/2
     ax.text(x_lbl, y1c, 'TTS', ha='right', va='center', rotation=90, fontsize=7, color='red',  alpha=0.7, zorder=5)
