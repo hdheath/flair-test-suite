@@ -4,7 +4,8 @@ plot_genome_browser_v13.py
 
 Generate a genome-browser style plot showing gene annotations and aligned reads with splice junctions.
 Takes a JSON config file as input with keys:
-  bam: path to BAM
+  bam: path to BAM (optional; when a region is provided the BAM is resolved
+      from the regionalize stage outputs)
   gtf: path to GTF
   junctions: path to splice junctions .tab (optional)
   mapping: path to isoform–read mapping file (optional)
@@ -45,7 +46,7 @@ from matplotlib.collections import PatchCollection, LineCollection
 
 @dataclass(frozen=True)
 class Config:
-    bam: Path
+    bam: Optional[Path] = None
     gtf: Path
     genome: str = ""
     outdir: Path = Path(".")
@@ -61,7 +62,7 @@ class Config:
     def from_json(p: Path) -> "Config":
         cfg = json.loads(p.read_text())
         return Config(
-            bam=Path(cfg["bam"]),
+            bam=Path(cfg["bam"]) if cfg.get("bam") else None,
             gtf=Path(cfg["gtf"]),
             genome=cfg.get("genome", ""),
             outdir=Path(cfg.get("outdir", ".")),
@@ -81,7 +82,7 @@ def parse_args():
     )
     p.add_argument(
         "-c", "--config", type=Path, required=True,
-        help=("JSON config keys: bam, gtf, mapping, collapsed_isoforms, genome, outdir, "
+        help=("JSON config keys: (bam), gtf, mapping, collapsed_isoforms, genome, outdir, "
               "gene_height, gene_row_height, read_row_height, fig_width, iso_kde"),
     )
     p.add_argument("--region", help="Limit plotting region (e.g. chr1:100-200)")
@@ -229,10 +230,28 @@ def _parse_region(region: Optional[str]) -> Optional[Tuple[str, int, int]]:
 def generate(cfg: Config, region: Optional[str] = None) -> None:
     """Generate transcriptome browser plot from configuration."""
     region_tuple = _parse_region(region)
+    chrom = None
+    r0 = r1 = None
+    if region_tuple:
+        chrom, r0, r1 = region_tuple
 
-    bam = cfg.bam
     gtf = cfg.gtf
-    if not bam.exists():
+
+    bam = None
+    if region_tuple:
+        tag = f"{chrom}_{r0}_{r1}"
+        run_root = gtf.parent.parent.parent
+        reg_root = run_root / "regionalize"
+        if reg_root.exists():
+            for d in reg_root.iterdir():
+                cand = d / f"{tag}.bam"
+                if cand.exists():
+                    bam = cand
+                    break
+    if bam is None:
+        bam = cfg.bam
+
+    if not bam or not bam.exists():
         logging.warning(f"BAM not found: {bam}")
         return
     if not gtf.exists():
@@ -263,6 +282,17 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
             blks = rd.get_blocks()
             if not blks:
                 continue
+            # Clip blocks to region bounds if provided
+            if r0 is not None:
+                clipped = []
+                for s, e in blks:
+                    s2 = max(s, r0)
+                    e2 = min(e, r1)
+                    if e2 > s2:
+                        clipped.append((s2, e2))
+                blks = clipped
+                if not blks:
+                    continue
             reads_blocks.append(blks)
             reads_introns.append([(blks[i][1], blks[i + 1][0]) for i in range(len(blks) - 1)])
             read_strands.append(read_strand(rd))
@@ -426,8 +456,14 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     if len(contigs) != 1:
         logging.warning(f"Multiple contigs in GTF view: {contigs}. Using first for title.")
     contig = contigs[0]
-    rs, re_ = int(gtf_df.start.min()), int(gtf_df.end.max())
-    gb_buffered = [(max(0, s - 5), e + 5) for s, e in zip(gtf_df.start, gtf_df.end)]
+    if region_tuple:
+        rs, re_ = r0, r1
+    else:
+        rs, re_ = int(gtf_df.start.min()), int(gtf_df.end.max())
+    gb_buffered = [
+        (max(0, max(s, rs) - 5), min(e, re_) + 5)
+        for s, e in zip(gtf_df.start, gtf_df.end)
+    ]
     rg, gn = assign_read_rows([[b] for b in gb_buffered])
     lab, gsp = gene_h * 0.3, gene_h * 7
     gbase = max(row_assign) + 2
@@ -474,11 +510,21 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
                 idxs = iso_to_idxs[iso]
                 cs = min(reads_blocks[j][0][0] for j in idxs)
                 ce = max(reads_blocks[j][-1][1] for j in idxs)
+            if r0 is not None:
+                cs = max(cs, rs)
+                ce = min(ce, re_)
             w = ce - cs
+            if w <= 0:
+                continue
             idxs = iso_to_idxs[iso]
             rng_left, rng_right = cs, ce
             ax.add_patch(Rectangle((cs, s1 - rh/2), w, rh, facecolor='none', edgecolor='none', zorder=1))
             blks_iso = iso_blocks.get(iso, [(cs, ce)])
+            if r0 is not None:
+                blks_iso = [
+                    (max(bs, rs), min(be, re_))
+                    for bs, be in blks_iso if be > rs and bs < re_
+                ]
             for bs, be in blks_iso:
                 ax.add_patch(Rectangle((bs, br - ih/2), be - bs, ih,
                                        facecolor=iso_colors[iso], edgecolor='black', linewidth=0.1, zorder=3))
@@ -520,7 +566,13 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
 
     # draw genes
     for i, row in gtf_df.iterrows():
-        s, e = row.start, row.end; y = gene_y[i]
+        s, e = int(row.start), int(row.end)
+        if r0 is not None:
+            s = max(s, rs)
+            e = min(e, re_)
+        y = gene_y[i]
+        if e <= s:
+            continue
         c = 'blue' if row.strand == '+' else 'red'
         ax.add_patch(Rectangle((s, y - gene_h/2), e - s, gene_h, color=c, linewidth=1))
         step = max(150, (e - s) // 10)
@@ -542,14 +594,18 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     # Determine horizontal span using current contig/region's cis rows ONLY (bug fix).
     cis_starts = cis_view.start.tolist() if not cis_view.empty else []
     cis_ends   = cis_view.end.tolist()   if not cis_view.empty else []
-    # always include reads and gene span
-    base_min = min(rs, read_min)
-    base_max = max(re_, read_max)
-    span_min = min([base_min] + cis_starts) if cis_starts else base_min
-    span_max = max([base_max] + cis_ends)   if cis_ends   else base_max
-    x_pad    = max((span_max - span_min) * 0.05, 50)
-    x_lo     = span_min - x_pad
-    x_hi     = span_max + x_pad
+    if region_tuple:
+        span_min, span_max = rs, re_
+        x_pad = (span_max - span_min) * 0.05
+        x_lo, x_hi = span_min - x_pad, span_max + x_pad
+    else:
+        base_min = min(rs, read_min)
+        base_max = max(re_, read_max)
+        span_min = min([base_min] + cis_starts) if cis_starts else base_min
+        span_max = max([base_max] + cis_ends)   if cis_ends   else base_max
+        x_pad    = max((span_max - span_min) * 0.05, 50)
+        x_lo     = span_min - x_pad
+        x_hi     = span_max + x_pad
 
     # build per-isoform weighted TSS/TTS
     tss_pos, tss_w = [], []
