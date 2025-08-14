@@ -289,12 +289,55 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
 
     # load mapping & collapsed isoforms
     mapping = load_mapping(mapping_file)
-    cis_df = pd.DataFrame(columns=['iso_id','start','end','strand'])
+    cis_df = pd.DataFrame(
+        columns=[
+            "iso_id",
+            "start",
+            "end",
+            "strand",
+            "blockCount",
+            "blockSizes",
+            "blockStarts",
+        ]
+    )
     if cis_bed and cis_bed.exists():
-        tmp = pd.read_csv(cis_bed, sep='\t', header=None, comment='#').iloc[:, :6]
-        tmp.columns = ['chr','start','end','iso_id','score','strand']
-        cis_df = tmp[['iso_id','start','end','strand']]
+        tmp = pd.read_csv(cis_bed, sep="\t", header=None, comment="#")
+        if tmp.shape[1] < 12:
+            logging.warning("Collapsed isoforms BED missing BED12 fields.")
+        else:
+            tmp = tmp.iloc[:, :12]
+        tmp.columns = [
+            "chr",
+            "start",
+            "end",
+            "iso_id",
+            "score",
+            "strand",
+            "thickStart",
+            "thickEnd",
+            "itemRgb",
+            "blockCount",
+            "blockSizes",
+            "blockStarts",
+        ]
+        cis_df = tmp[
+            [
+                "iso_id",
+                "start",
+                "end",
+                "strand",
+                "blockCount",
+                "blockSizes",
+                "blockStarts",
+            ]
+        ]
     ci_map = {r.iso_id: (r.start, r.end) for _, r in cis_df.iterrows()}
+    iso_blocks: dict[str, list[tuple[int, int]]] = {}
+    for _, r in cis_df.iterrows():
+        sizes = [int(x) for x in str(r.blockSizes).rstrip(",").split(",") if x]
+        starts = [int(x) for x in str(r.blockStarts).rstrip(",").split(",") if x]
+        blks = [(r.start + st, r.start + st + sz) for st, sz in zip(starts, sizes)]
+        iso_blocks[r.iso_id] = blks
 
     # group by isoform
     iso_to_idxs, unassigned = defaultdict(list), []
@@ -441,13 +484,35 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
             left=min(reads_blocks[j][0][0] for j in idxs)
             right=max(reads_blocks[j][-1][1] for j in idxs)
             ax.add_patch(Rectangle((cs,s1-rh/2),w,rh,facecolor='none',edgecolor='none',zorder=1))
-            ax.add_patch(Rectangle((cs,br-ih/2),w,ih,facecolor=iso_colors[iso],edgecolor='black',linewidth=0.1,zorder=3))
+            blks = iso_blocks.get(iso, [(cs, ce)])
+            for bs, be in blks:
+                ax.add_patch(
+                    Rectangle(
+                        (bs, br-ih/2),
+                        be-bs,
+                        ih,
+                        facecolor=iso_colors[iso],
+                        edgecolor='black',
+                        linewidth=0.1,
+                        zorder=3,
+                    )
+                )
+            intr = [(blks[i][1], blks[i+1][0]) for i in range(len(blks)-1)]
+            if intr:
+                ax.add_collection(
+                    LineCollection(
+                        [((a, br), (b, br)) for a,b in intr],
+                        colors='black',
+                        linewidths=0.5,
+                        zorder=3,
+                    )
+                )
             ax.add_patch(Rectangle((left,s2-new_h/2),right-left,new_h*5,facecolor='none',edgecolor='none',zorder=2))
             ax.add_patch(Rectangle((left,er-new_h/2),right-left,new_h,facecolor='none',edgecolor='black',linewidth=0.1,zorder=2))
             ax.add_patch(Rectangle((left,s3-new_h/2),right-left,new_h,facecolor='none',edgecolor='none',zorder=2))
             ax.add_patch(Rectangle((left,e2-new_h/2),right-left,new_h,facecolor='none',edgecolor='black',linewidth=0.1,zorder=2))
             ax.add_patch(Rectangle((left,s4-new_h/2),right-left,new_h,facecolor='none',edgecolor='none',zorder=2))
-            if cfg.iso_kde and len(idxs) >= 5:
+            if cfg.iso_kde and len(idxs) >= 2:
                 tis, tts = [], []
                 for j in idxs:
                     s, e = reads_blocks[j][0][0], reads_blocks[j][-1][1]
@@ -494,10 +559,16 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     y_lo     = min(all_rows) - new_h/2 - 1
     old_y_hi = max(gene_y.values()) + gene_h/2 + lab + 10
 
-    # Determine horizontal span using both gene annotations and read extents.
-    span_min = min(rs, read_min)
-    span_max = max(re_, read_max)
-    x_pad    = (span_max - span_min) * 0.05
+    # Determine horizontal span using gene annotations, reads, and any
+    # collapsed isoforms that actually appear in the plotted region.  The
+    # collapsed BED can contain isoforms from across the genome; including all
+    # of them here would massively inflate the x-range and squash the plotted
+    # reads.  Restricting to ``isos`` keeps the limits tight around the data.
+    cis_starts = [ci_map[i][0] for i in isos if i in ci_map]
+    cis_ends   = [ci_map[i][1] for i in isos if i in ci_map]
+    span_min = min([rs, read_min] + cis_starts)
+    span_max = max([re_, read_max] + cis_ends)
+    x_pad    = max((span_max - span_min) * 0.05, 50)
     x_lo     = span_min - x_pad
     x_hi     = span_max + x_pad
 
