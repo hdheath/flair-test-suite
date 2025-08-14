@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .base import StageBase
-from .stage_utils import read_region_details
+from .stage_utils import read_region_details, make_flair_cmd
 class TranscriptomeStage(StageBase):
     """
     FLAIR transcriptome stage (v3+)
@@ -125,26 +125,28 @@ class TranscriptomeStage(StageBase):
         if mode == "regionalized":
             # One transcriptome call per region
             for bam, tag in bam_pairs:
-                cmd = [
-                    "flair", "transcriptome",
-                    "-b", str(bam),
-                    "-g", str(genome),
-                    "-o", tag,
-                    *flag_parts,
-                ]
-                cmds.append(cmd)
+                cmds.append(
+                    make_flair_cmd(
+                        "transcriptome",
+                        bam=bam,
+                        genome=genome,
+                        out=tag,
+                        flags=flag_parts,
+                    )
+                )
                 logging.info(f"[transcriptome] Scheduled per-region transcriptome: {tag}")
         else:
             # Single standard call
             bam, _ = bam_pairs[0]
-            cmd = [
-                "flair", "transcriptome",
-                "-b", str(bam),
-                "-g", str(genome),
-                "-o", self.run_id,
-                *flag_parts,
-            ]
-            cmds.append(cmd)
+            cmds.append(
+                make_flair_cmd(
+                    "transcriptome",
+                    bam=bam,
+                    genome=genome,
+                    out=self.run_id,
+                    flags=flag_parts,
+                )
+            )
             logging.info(f"[transcriptome] Scheduled standard transcriptome: {self.run_id}")
 
         logging.debug(f"[transcriptome] mode={mode} commands={len(cmds)}")

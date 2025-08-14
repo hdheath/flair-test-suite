@@ -21,6 +21,45 @@ def resolve_path(raw: str | Path, *, data_dir: Path) -> Path:
     p = Path(raw)
     return p if p.is_absolute() else (data_dir / p).resolve()
 
+
+def make_flair_cmd(
+    subcmd: str,
+    *,
+    genome: Path | str | None = None,
+    reads: Iterable[Path | str] | Path | str | None = None,
+    bed: Path | str | None = None,
+    bam: Path | str | None = None,
+    out: Path | str | None = None,
+    flags: Iterable[str] | None = None,
+) -> List[str]:
+    """Return a FLAIR command list with common -g/-r/-q/-b/-o options."""
+
+    cmd: List[str] = ["flair", subcmd]
+
+    if genome:
+        cmd.extend(["-g", str(genome)])
+
+    if reads:
+        if isinstance(reads, (str, Path)):
+            cmd.extend(["-r", str(reads)])
+        else:
+            cmd.append("-r")
+            cmd.extend(str(r) for r in reads)
+
+    if bed:
+        cmd.extend(["-q", str(bed)])
+
+    if bam:
+        cmd.extend(["-b", str(bam)])
+
+    if out:
+        cmd.extend(["-o", str(out)])
+
+    if flags:
+        cmd.extend(list(flags))
+
+    return cmd
+
 # ── flag parsing helpers -------------------------------------------
 
 def iter_stage_flags(flags_block) -> Iterator[Tuple[str, object]]:
