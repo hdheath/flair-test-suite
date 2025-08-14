@@ -572,7 +572,12 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
 
     # save
     out_png = outdir / f"{genome}_{contig}_{rs}-{re_}.png"
-    fig.savefig(out_png, bbox_inches='tight')
+    # ``bbox_inches='tight'`` can drastically enlarge the exported PNG when
+    # any artist lies outside the plot limits.  This resulted in images with
+    # widths in the hundreds of thousands of pixels.  Saving without the
+    # "tight" bounding box preserves the intended figure dimensions so the
+    # reported size matches the actual file.
+    fig.savefig(out_png, dpi=fig.dpi)
     plt.close(fig)
     width_px, height_px = int(fig_w * fig.dpi), int(fig_h * fig.dpi)
     print(f"Figure dimensions: {width_px} x {height_px} pixels")
