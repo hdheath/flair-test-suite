@@ -8,7 +8,7 @@ from typing import List, Tuple
 from .base import StageBase
 from ..qc.qc_utils import count_lines
 from ..qc import write_metrics
-from .stage_utils import read_region_details
+from .stage_utils import read_region_details, make_flair_cmd
 ...
 # Force-load TED QC so Reinstate knows transcriptome has QC
 try:
@@ -117,27 +117,29 @@ class CollapseStage(StageBase):
 
         if mode == "regionalized":
             for bed, tag in bed_pairs:
-                cmd = [
-                    "flair", "collapse",
-                    "-q", str(bed),
-                    "-g", str(genome),
-                    "-r", *map(str, reads),
-                    "-o", tag,
-                    *flag_parts,
-                ]
-                cmds.append(cmd)
+                cmds.append(
+                    make_flair_cmd(
+                        "collapse",
+                        bed=bed,
+                        genome=genome,
+                        reads=reads,
+                        out=tag,
+                        flags=flag_parts,
+                    )
+                )
                 logging.info(f"[collapse] Scheduled per-region collapse: {tag}")
         else:
             bed, _ = bed_pairs[0]
-            cmd = [
-                "flair", "collapse",
-                "-q", str(bed),
-                "-g", str(genome),
-                "-r", *map(str, reads),
-                "-o", self.run_id,
-                *flag_parts,
-            ]
-            cmds.append(cmd)
+            cmds.append(
+                make_flair_cmd(
+                    "collapse",
+                    bed=bed,
+                    genome=genome,
+                    reads=reads,
+                    out=self.run_id,
+                    flags=flag_parts,
+                )
+            )
             logging.info(f"[collapse] Scheduled standard collapse: {self.run_id}")
 
         logging.debug(f"[collapse] mode={mode} commands={len(cmds)}")

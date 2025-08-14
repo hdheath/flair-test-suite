@@ -12,7 +12,7 @@ from pathlib import Path # for filesystem paths
 
 from .base import StageBase       # base class providing orchestration logic
 
-from .stage_utils import count_reads
+from .stage_utils import count_reads, make_flair_cmd
 
 class AlignStage(StageBase):
     """
@@ -65,14 +65,13 @@ class AlignStage(StageBase):
 
         # --- construct and return the final command list ---
         out_prefix = f"{self.run_id}_flair"
-        cmd = [
-            "flair", "align",
-            "-g", str(genome),
-            "-r", str(reads),
-            "-o", out_prefix,
-            *flag_parts,
-        ]
-        return cmd
+        return make_flair_cmd(
+            "align",
+            genome=genome,
+            reads=reads,
+            out=out_prefix,
+            flags=flag_parts,
+        )
 
     @property
     def tool_version(self) -> str:

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .base import StageBase
-from .stage_utils import read_region_details
+from .stage_utils import read_region_details, make_flair_cmd
 from ..qc.correct_qc import run_qc
 from ..qc import write_metrics
 from ..qc.qc_utils import count_lines
@@ -27,21 +27,12 @@ class CorrectStage(StageBase):
         # Use configured run version for signature (or override to detect flair --version)
         return str(self.cfg.run.version)
 
-    # -------- command builder (single source of truth) --------
-    def build_cmds(self) -> List[List[str]]:
-        cfg = self.cfg
-        self._bed_files: List[Tuple[Path, str]] = []
+    def _resolve_bed_files(self) -> Tuple[List[Tuple[Path, str]], Path | None]:
+        """Discover BED inputs from upstream stages."""
 
-        # Resolve genome path for later QC
-        resolved = self.resolve_stage_inputs({
-            "genome": cfg.run.genome_fa,
-            "reads": getattr(cfg, "reads_file", None) or cfg.run.reads_file,
-        })
-        genome = resolved["genome"]
-        self._genome_fa_abs = str(genome)
+        bed_files: List[Tuple[Path, str]] = []
+        upstream_sig: Path | None = None
 
-        # Discover upstreams
-        upstream_sig = None
         if "regionalize" in self.upstreams:
             reg_pb = self.upstreams["regionalize"]
             upstream_sig = reg_pb.signature
@@ -56,35 +47,45 @@ class CorrectStage(StageBase):
                     raise RuntimeError(
                         f"Expected region output BED not found: {bed_file}"
                     )
-                self._bed_files.append((bed_file, f"{chrom}_{start}_{end}"))
+                bed_files.append((bed_file, f"{chrom}_{start}_{end}"))
         elif "align" in self.upstreams:
             aln_pb = self.upstreams["align"]
             upstream_sig = aln_pb.signature
             bed_file = aln_pb.stage_dir / f"{self.run_id}_flair.bed"
             if not bed_file.exists():
                 raise RuntimeError(f"Expected align output BED not found: {bed_file}")
-            self._bed_files.append((bed_file, self.run_id))
+            bed_files.append((bed_file, self.run_id))
         else:
             raise RuntimeError("No valid upstream found for correct stage.")
 
-        # Parse flags, set signature inputs
+        return bed_files, upstream_sig
+
+    # -------- command builder (single source of truth) --------
+    def build_cmds(self) -> List[List[str]]:
+        cfg = self.cfg
+        self._bed_files, upstream_sig = self._resolve_bed_files()
+
+        resolved = self.resolve_stage_inputs({
+            "genome": cfg.run.genome_fa,
+            "reads": getattr(cfg, "reads_file", None) or cfg.run.reads_file,
+        })
+        genome = resolved["genome"]
+        self._genome_fa_abs = str(genome)
+
         flag_parts, extra_inputs = self.resolve_stage_flags()
         self._flags_components = flag_parts
         self._hash_inputs = [genome] + [bf[0] for bf in self._bed_files] + extra_inputs
         if upstream_sig:
             self._hash_inputs.append(upstream_sig)
 
-        # Capture align read count for metadata (used only in non-regionalized QC)
         align_meta = self.upstreams["align"].metadata
         self._n_input_reads = align_meta.get("n_input_reads", align_meta.get("n_total_reads"))
 
-        # Compose commands, skipping empty inputs
         flair_version = str(cfg.run.version)
         major_version = int(flair_version.split(".")[0])
 
         cmds: List[List[str]] = []
         for bed_file, region_tag in self._bed_files:
-            # hard skip empties (zero bytes OR zero records)
             if (
                 (not bed_file.exists())
                 or (bed_file.stat().st_size == 0)
@@ -93,10 +94,14 @@ class CorrectStage(StageBase):
                 logging.warning(f"[correct] Skipping empty BED: {bed_file}")
                 continue
 
-            out_prefix = region_tag  # FLAIR writes {out_prefix}_all_corrected.bed
-            cmd = ["flair", "correct", "-q", str(bed_file), "-o", out_prefix, *flag_parts]
-            if major_version < 3:
-                cmd.extend(["-g", str(genome)])
+            out_prefix = region_tag
+            cmd = make_flair_cmd(
+                "correct",
+                bed=bed_file,
+                genome=(genome if major_version < 3 else None),
+                out=out_prefix,
+                flags=flag_parts,
+            )
             cmds.append(cmd)
 
         return cmds
