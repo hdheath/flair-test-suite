@@ -27,10 +27,12 @@ python ted_browser_v2.4.py -c /private/groups/brookslab/hdheath/projects/ted/tra
 
 """
 
-import os
 import json
 import argparse
-import warnings
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 from collections import defaultdict
 from itertools import chain
 
@@ -41,52 +43,155 @@ from matplotlib.patches import Rectangle
 import numpy as np
 from scipy.stats import gaussian_kde
 from intervaltree import IntervalTree
-import time
 from matplotlib.collections import PatchCollection, LineCollection
+
+
+@dataclass(frozen=True)
+class Config:
+    bam: Path
+    gtf: Path
+    genome: str = ""
+    outdir: Path = Path(".")
+    mapping: Optional[Path] = None
+    collapsed_isoforms: Optional[Path] = None
+    gene_height: float = 1.5
+    gene_row_height: float = 3.0
+    read_row_height: float = 0.02
+    fig_width: float = 12.0
+    iso_kde: bool = True
+
+    @staticmethod
+    def from_json(p: Path) -> "Config":
+        cfg = json.loads(p.read_text())
+        return Config(
+            bam=Path(cfg["bam"]),
+            gtf=Path(cfg["gtf"]),
+            genome=cfg.get("genome", ""),
+            outdir=Path(cfg.get("outdir", ".")),
+            mapping=Path(cfg["mapping"]) if cfg.get("mapping") else None,
+            collapsed_isoforms=Path(cfg["collapsed_isoforms"]) if cfg.get("collapsed_isoforms") else None,
+            gene_height=cfg.get("gene_height", 1.5),
+            gene_row_height=cfg.get("gene_row_height", 3.0),
+            read_row_height=cfg.get("read_row_height", 0.02),
+            fig_width=cfg.get("fig_width", 12.0),
+            iso_kde=cfg.get("iso_kde", True),
+        )
 
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Reads/genes/collapsed isoforms + reversed read-span above"
+        description="Reads/genes/collapsed isoforms + reversed read-span above",
     )
-    p.add_argument('-c','--config', required=True,
-        help="JSON config keys: bam, gtf, mapping, collapsed_isoforms, genome, outdir, "
-             "gene_height, gene_row_height, read_row_height, fig_width")
+    p.add_argument(
+        "-c",
+        "--config",
+        type=Path,
+        required=True,
+        help=(
+            "JSON config keys: bam, gtf, mapping, collapsed_isoforms, genome, outdir, "
+            "gene_height, gene_row_height, read_row_height, fig_width, iso_kde"
+        ),
+    )
+    p.add_argument(
+        "--region",
+        help="Limit plotting region (e.g. chr1:100-200)",
+    )
     return p.parse_args()
 
 
-def load_gtf(gtf_path):
-    if not os.path.exists(gtf_path):
-        warnings.warn(f"GTF not found: {gtf_path}")
+def pleasant_colors(seq):
+    def ok(rgb):
+        mx, mn = max(rgb), min(rgb)
+        return (mx < 0.9) and not (mx - mn < 0.2 and mx > 0.7)
+
+    return [c for c in seq if ok(c)]
+
+
+def read_strand(rd: pysam.AlignedSegment) -> str:
+    xs = rd.get_tag("XS") if rd.has_tag("XS") else None
+    if xs in ("+", "-"):
+        return xs
+    return "-" if rd.is_reverse else "+"
+
+
+def overlaps(tree: IntervalTree, blks) -> bool:
+    return any(tree.overlap(s, e) for s, e in blks)
+
+
+def add_blocks(tree: IntervalTree, blks) -> None:
+    for s, e in blks:
+        tree.addi(s, e, True)
+
+
+def ensure_rows(occupancy, upto):
+    missing = upto - (len(occupancy) - 1)
+    for _ in range(max(0, missing)):
+        occupancy.append(IntervalTree())
+
+
+def reserve_iso_rows(base: int, max_rel: int) -> dict[str, int]:
+    return {
+        "space1": base + max_rel + 1,
+        "collapsed_bar": base + max_rel + 2,
+        "space2": base + max_rel + 4,
+        "empty1": base + max_rel + 6,
+        "space3": base + max_rel + 9,
+        "empty2": base + max_rel + 11,
+        "space4": base + max_rel + 14,
+    }
+
+
+def rects_from_bins(edges, heights, y0, hscale, facecolor):
+    rects = []
+    width = edges[1] - edges[0]
+    for x, h in zip(edges[:-1], heights):
+        if h <= 0:
+            continue
+        rects.append(Rectangle((x, y0), width, h * hscale))
+    pc = PatchCollection(rects, match_original=False)
+    pc.set_facecolor(facecolor)
+    pc.set_edgecolor("none")
+    pc.set_alpha(0.4)
+    pc.set_zorder(3)
+    return pc
+
+
+def load_gtf(gtf_path: Path, region=None):
+    if not gtf_path.exists():
+        logging.warning(f"GTF not found: {gtf_path}")
         return pd.DataFrame()
     df = pd.read_csv(
-        gtf_path, sep='\t', header=None, comment='#',
-        names=['chr','source','feature','start','end','score','strand','frame','attributes']
+        gtf_path,
+        sep='\t',
+        header=None,
+        comment='#',
+        names=['chr','source','feature','start','end','score','strand','frame','attributes'],
     )
     tx = df[df['feature']=='transcript'].copy()
     tx['gene_id'] = tx['attributes'].str.extract(r'gene_id "([^"]+)"')
     collapsed = (
-        tx
-        .groupby(['gene_id','strand'])
-        .agg({'chr':'first','start':'min','end':'max'})
-        .reset_index()
+        tx.groupby(['gene_id','strand']).agg({'chr':'first','start':'min','end':'max'}).reset_index()
     )
-    return collapsed[['chr','start','end','strand','gene_id']]
+    res = collapsed[['chr','start','end','strand','gene_id']]
+    if region:
+        chrom, start, end = region
+        res = res[(res['chr']==chrom) & (res['start']<end) & (res['end']>start)]
+    return res
 
 
-def load_mapping(map_path):
-    m = {}
-    if not map_path or not os.path.exists(map_path):
-        warnings.warn(f"Mapping not found: {map_path}")
+def load_mapping(map_path: Optional[Path]):
+    m: dict[str, str] = {}
+    if not map_path or not map_path.exists():
+        logging.warning(f"Mapping not found: {map_path}")
         return m
-    with open(map_path) as f:
+    with map_path.open() as f:
         for line in f:
             iso, reads = line.strip().split('\t')
             for r in reads.split(','):
                 if r:
                     m[r] = iso
     if not m:
-        warnings.warn("Mapping is empty.")
+        logging.warning("Mapping is empty.")
     return m
 
 
@@ -119,51 +224,60 @@ def assign_read_rows(blocks_list):
 
 def main():
     args = parse_args()
-    cfg = json.load(open(args.config))
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    cfg = Config.from_json(args.config)
 
-    # timing start
-    t_global_start = time.time()
+    region_tuple = None
+    if args.region:
+        chrom, start, end = args.region.replace(":", "\t").replace("-", "\t").split("\t")
+        start, end = int(start), int(end)
+        if end - start >= 20000:
+            logging.warning("Region length >= 20000bp; skipping plot")
+            return
+        region_tuple = (chrom, start, end)
 
-    # config
-    bam          = cfg['bam']
-    gtf          = cfg['gtf']
-    mapping_file = cfg.get('mapping')
-    cis_bed      = cfg.get('collapsed_isoforms')
-    genome       = cfg.get('genome', '')
-    outdir       = cfg.get('outdir', '.')
-    gene_h       = cfg.get('gene_height', 1.5)
-    gene_row_h   = cfg.get('gene_row_height', 3)
-    read_row_h   = cfg.get('read_row_height', 0.02)
-    fig_w        = cfg.get('fig_width', 12)
-    os.makedirs(outdir, exist_ok=True)
+    bam = cfg.bam
+    gtf = cfg.gtf
+    mapping_file = cfg.mapping
+    cis_bed = cfg.collapsed_isoforms
+    genome = cfg.genome
+    outdir = cfg.outdir
+    gene_h = cfg.gene_height
+    gene_row_h = cfg.gene_row_height
+    read_row_h = cfg.read_row_height
+    fig_w = cfg.fig_width
+    outdir.mkdir(parents=True, exist_ok=True)
 
     # load reads
     reads_blocks, reads_introns, read_strands, read_names = [], [], [], []
-    bf = pysam.AlignmentFile(bam, 'rb')
-    for rd in bf.fetch():
-        if rd.is_unmapped: continue
-        blks = rd.get_blocks()
-        if not blks: continue
-        reads_blocks.append(blks)
-        reads_introns.append([(blks[i][1], blks[i+1][0]) for i in range(len(blks)-1)])
-        read_strands.append('-' if rd.is_reverse else '+')
-        read_names.append(rd.query_name)
+    with pysam.AlignmentFile(bam, "rb") as bf:
+        iterator = bf.fetch(*region_tuple) if region_tuple else bf.fetch()
+        for rd in iterator:
+            if rd.is_unmapped:
+                continue
+            blks = rd.get_blocks()
+            if not blks:
+                continue
+            reads_blocks.append(blks)
+            reads_introns.append([(blks[i][1], blks[i + 1][0]) for i in range(len(blks) - 1)])
+            read_strands.append(read_strand(rd))
+            read_names.append(rd.query_name)
     if not reads_blocks:
-        warnings.warn("No reads loaded.")
+        logging.warning("No reads loaded.")
         return
 
     all_starts = [b[0] for blks in reads_blocks for b in blks]
-    all_ends   = [b[1] for blks in reads_blocks for b in blks]
+    all_ends = [b[1] for blks in reads_blocks for b in blks]
     read_min, read_max = min(all_starts), max(all_ends)
 
     # load mapping & collapsed isoforms
     mapping = load_mapping(mapping_file)
     cis_df = pd.DataFrame(columns=['iso_id','start','end','strand'])
-    if cis_bed and os.path.exists(cis_bed):
-        tmp = pd.read_csv(cis_bed, sep='\t', header=None, comment='#').iloc[:,:6]
+    if cis_bed and cis_bed.exists():
+        tmp = pd.read_csv(cis_bed, sep='\t', header=None, comment='#').iloc[:, :6]
         tmp.columns = ['chr','start','end','iso_id','score','strand']
         cis_df = tmp[['iso_id','start','end','strand']]
-    ci_map = {r.iso_id:(r.start, r.end) for _,r in cis_df.iterrows()}
+    ci_map = {r.iso_id: (r.start, r.end) for _, r in cis_df.iterrows()}
 
     # group by isoform
     iso_to_idxs, unassigned = defaultdict(list), []
@@ -172,81 +286,108 @@ def main():
         if iso: iso_to_idxs[iso].append(i)
         else:   unassigned.append(i)
 
-    palette = list(chain(plt.cm.tab20.colors, plt.cm.Set3.colors, plt.cm.Dark2.colors))
-    pal = [c for c in palette if max(c)<0.9 and not (max(c)-min(c)<0.2 and max(c)>0.7)]
+    base_colors = list(chain(plt.cm.tab20.colors, plt.cm.Set3.colors, plt.cm.Dark2.colors))
+    pal = pleasant_colors(base_colors)
     isos = sorted(iso_to_idxs, key=lambda i: len(iso_to_idxs[i]), reverse=True)
     iso_colors = {iso: pal[i%len(pal)] for i,iso in enumerate(isos)}
     ua_color = 'lightgrey'
 
     # layout
-    occupancy, row_assign, collapsed = [], [None]*len(reads_blocks), {}
-    ih, rh, new_h = gene_h*0.6, gene_h*0.6, gene_h*3
+    occupancy, row_assign, collapsed = [], [None] * len(reads_blocks), {}
+    ih, rh, new_h = gene_h * 0.6, gene_h * 0.6, gene_h * 3
 
     for iso in isos:
         idxs = iso_to_idxs[iso]
         sorted_idxs = sorted(idxs, key=lambda i: reads_blocks[i][0][0])
-        blks_list,_ = zip(*[(reads_blocks[i],None) for i in sorted_idxs])
-        rel,_ = assign_read_rows(blks_list)
+        blks_list, _ = zip(*[(reads_blocks[i], None) for i in sorted_idxs])
+        rel, _ = assign_read_rows(blks_list)
 
-        st,en = ci_map.get(iso,(None,None))
+        st, en = ci_map.get(iso, (None, None))
         if st is None:
-            warnings.warn(f"No collapsed bar for {iso}")
+            logging.warning(f"No collapsed bar for {iso}")
             continue
 
         left = min(reads_blocks[j][0][0] for j in idxs)
-        right= max(reads_blocks[j][-1][1] for j in idxs)
+        right = max(reads_blocks[j][-1][1] for j in idxs)
         max_rel = max(rel)
-        specs = [(1,st,en),(2,st,en),(4,left,right),(6,left,right),(9,left,right),(11,left,right),(14,left,right)]
 
-        for base in range(len(occupancy)+1):
-            ok=True
-            for ri,blks in zip(rel,blks_list):
-                for off in (0,1):
-                    tgt=base+ri+off
-                    if tgt<len(occupancy) and any(len(occupancy[tgt].overlap(b[0],b[1]))>0 for b in blks): ok=False;break
-                if not ok: break
-            if not ok: continue
-            for off,ps,pe in specs:
-                pr=base+max_rel+off
-                if pr<len(occupancy) and occupancy[pr].overlap(ps,pe): ok=False; break
-            if ok: break
+        for base in range(len(occupancy) + 1):
+            ok = True
+            for ri, blks in zip(rel, blks_list):
+                for off in (0, 1):
+                    tgt = base + ri + off
+                    if tgt < len(occupancy) and overlaps(occupancy[tgt], blks):
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if not ok:
+                continue
+            spec_rows = reserve_iso_rows(base, max_rel)
+            for key, pr in spec_rows.items():
+                seg = (left, right) if key not in ("space1", "collapsed_bar") else (st, en)
+                if pr < len(occupancy) and overlaps(occupancy[pr], [seg]):
+                    ok = False
+                    break
+            if ok:
+                break
         else:
-            base=len(occupancy)
+            base = len(occupancy)
+            spec_rows = reserve_iso_rows(base, max_rel)
 
-        max_r=base+max_rel; space1=max_r+1; col_r=max_r+2; space2=max_r+4
-        emp1 =max_r+6; space3=max_r+9; emp2=max_r+11; space4=max_r+14
-        for r in range(space4+1):
-            if r>=len(occupancy): occupancy.append(IntervalTree())
-        for ri,idx in zip(rel,sorted_idxs):
-            r=base+ri; row_assign[idx]=r
-            for b in reads_blocks[idx]: occupancy[r].addi(b[0],b[1],True)
-        for r in (space1,col_r,space2,emp1,space3,emp2,space4):
-            occupancy[r].addi(left if r>=space2 else st, right if r>=space2 else en, True)
-        collapsed[iso]=(space1,col_r,space2,emp1,space3,emp2,space4)
+        ensure_rows(occupancy, spec_rows["space4"])
+        for ri, idx in zip(rel, sorted_idxs):
+            r = base + ri
+            row_assign[idx] = r
+            add_blocks(occupancy[r], reads_blocks[idx])
+        for key in ("space1", "collapsed_bar", "space2", "empty1", "space3", "empty2", "space4"):
+            r = spec_rows[key]
+            seg = (left, right) if key not in ("space1", "collapsed_bar") else (st, en)
+            add_blocks(occupancy[r], [seg])
+        collapsed[iso] = (
+            spec_rows["space1"],
+            spec_rows["collapsed_bar"],
+            spec_rows["space2"],
+            spec_rows["empty1"],
+            spec_rows["space3"],
+            spec_rows["empty2"],
+            spec_rows["space4"],
+        )
 
     for idx in unassigned:
-        blks=reads_blocks[idx]; placed=False
+        blks = reads_blocks[idx]
+        placed = False
         for r in range(len(occupancy)):
-            if any(len(occupancy[r].overlap(b[0],b[1]))>0 for b in blks): continue
-            if r>0 and any(len(occupancy[r-1].overlap(b[0],b[1]))>0 for b in blks): continue
-            if r<len(occupancy)-1 and any(len(occupancy[r+1].overlap(b[0],b[1]))>0 for b in blks): continue
-            row_assign[idx]=r
-            for b in blks: occupancy[r].addi(b[0],b[1],True)
-            placed=True; break
+            if overlaps(occupancy[r], blks):
+                continue
+            if r > 0 and overlaps(occupancy[r - 1], blks):
+                continue
+            if r < len(occupancy) - 1 and overlaps(occupancy[r + 1], blks):
+                continue
+            row_assign[idx] = r
+            add_blocks(occupancy[r], blks)
+            placed = True
+            break
         if not placed:
-            t=IntervalTree()
-            for b in blks: t[b[0]:b[1]]=True
-            occupancy.append(t); row_assign[idx]=len(occupancy)-1
-            warnings.warn(f"Unassigned read at row {row_assign[idx]}")
+            t = IntervalTree()
+            add_blocks(t, blks)
+            occupancy.append(t)
+            row_assign[idx] = len(occupancy) - 1
+            logging.warning(f"Unassigned read at row {row_assign[idx]}")
 
     tot=len(occupancy)
     row_assign=[tot-1-r for r in row_assign]
     collapsed={iso:tuple(tot-1-r for r in rows) for iso,rows in collapsed.items()}
 
-    gtf_df=load_gtf(gtf)
+    gtf_df=load_gtf(gtf, region_tuple)
     if gtf_df.empty:
-        warnings.warn("No genes.");return
-    contig,rs,re_=(gtf_df.chr.iloc[0],int(gtf_df.start.min()),int(gtf_df.end.max()))
+        logging.warning("No genes.")
+        return
+    contigs = gtf_df["chr"].unique().tolist()
+    if len(contigs) != 1:
+        logging.warning(f"Multiple contigs in GTF view: {contigs}. Using first for title.")
+    contig = contigs[0]
+    rs, re_ = int(gtf_df.start.min()), int(gtf_df.end.max())
     gb_buffered=[(max(0,s-5),e+5) for s,e in zip(gtf_df.start,gtf_df.end)]
     rg,gn=assign_read_rows([[b] for b in gb_buffered])
     lab, gsp = gene_h*0.3, gene_h*7
@@ -254,7 +395,7 @@ def main():
     gene_y={i:gbase+rg[i]*gsp for i in range(len(rg))}
 
     fig_h=read_row_h*tot+gene_row_h*gn
-    fig=plt.figure(figsize=(fig_w,fig_h))
+    fig=plt.figure(figsize=(fig_w,fig_h), dpi=600)
     ax=fig.add_subplot(1,1,1)
     for side in ['left','right','bottom','top']:
         ax.spines[side].set_color('gray'); ax.spines[side].set_linewidth(0.4); ax.spines[side].set_alpha(0.4)
@@ -289,20 +430,28 @@ def main():
             ax.add_patch(Rectangle((left,s3-new_h/2),right-left,new_h,facecolor='none',edgecolor='none',zorder=2))
             ax.add_patch(Rectangle((left,e2-new_h/2),right-left,new_h,facecolor='none',edgecolor='black',linewidth=0.1,zorder=2))
             ax.add_patch(Rectangle((left,s4-new_h/2),right-left,new_h,facecolor='none',edgecolor='none',zorder=2))
-            # KDE
-            tis,tts=[],[]
-            for j in idxs:
-                s,e=reads_blocks[j][0][0],reads_blocks[j][-1][1]
-                if read_strands[j]=='+': tis.append(s); tts.append(e)
-                else: tis.append(e); tts.append(s)
-            bins=np.linspace(left,right,300)
-            bw=bins[1]-bins[0]
-            if len(set(tis))>1:
-                h=gaussian_kde(tis)(bins); h/=h.max()
-                for xval,hval in zip(bins,h): ax.add_patch(Rectangle((xval,er-new_h/2),bw,hval*new_h,facecolor=iso_colors[iso],edgecolor='none',alpha=0.6,zorder=4))
-            if len(set(tts))>1:
-                h=gaussian_kde(tts)(bins); h/=h.max()
-                for xval,hval in zip(bins,h): ax.add_patch(Rectangle((xval,e2-new_h/2),bw,hval*new_h,facecolor=iso_colors[iso],edgecolor='none',alpha=0.6,zorder=4))
+            if cfg.iso_kde and len(idxs) >= 5:
+                tis, tts = [], []
+                for j in idxs:
+                    s, e = reads_blocks[j][0][0], reads_blocks[j][-1][1]
+                    if read_strands[j] == '+':
+                        tis.append(s); tts.append(e)
+                    else:
+                        tis.append(e); tts.append(s)
+                bins = np.linspace(left, right, 300)
+                bw = bins[1] - bins[0]
+                if len(set(tis)) > 1:
+                    h = gaussian_kde(tis)(bins)
+                    h /= h.max()
+                    for xval, hval in zip(bins, h):
+                        ax.add_patch(Rectangle((xval, er - new_h/2), bw, hval * new_h,
+                                               facecolor=iso_colors[iso], edgecolor='none', alpha=0.6, zorder=4))
+                if len(set(tts)) > 1:
+                    h = gaussian_kde(tts)(bins)
+                    h /= h.max()
+                    for xval, hval in zip(bins, h):
+                        ax.add_patch(Rectangle((xval, e2 - new_h/2), bw, hval * new_h,
+                                               facecolor=iso_colors[iso], edgecolor='none', alpha=0.6, zorder=4))
             label_x=left-(right-left)*0.005
             ax.text(label_x,er,'TSS',ha='right',va='center',rotation=90,fontsize=3,color='black',alpha=0.7,zorder=5)
             ax.text(label_x,e2,'TTS',ha='right',va='center',rotation=90,fontsize=3,color='black',alpha=0.7,zorder=5)
@@ -370,27 +519,17 @@ def main():
     # ── binned histogram + smoothing in bottom box (TSS) ──
     # bottom box: plot TTS histogram
     counts_tts, edges_tts = np.histogram(tts_pos, bins=200, weights=tts_w)
-    smoothed_tts = np.convolve(counts_tts, np.ones(5)/5, mode='same')
-    if smoothed_tts.max()>0:
+    smoothed_tts = np.convolve(counts_tts, np.ones(5) / 5, mode='same')
+    if smoothed_tts.max() > 0:
         smoothed_tts /= smoothed_tts.max()
-    width_bin = edges_tts[1] - edges_tts[0]
-    for left_edge, h in zip(edges_tts[:-1], smoothed_tts):
-        ax.add_patch(Rectangle(
-            (left_edge, y1), width_bin, h * rect_h,
-            facecolor='red', edgecolor='none', alpha=0.4, zorder=3
-        ))
+    ax.add_collection(rects_from_bins(edges_tts, smoothed_tts, y1, rect_h, 'red'))
 
     # top box: plot TSS histogram
     counts_tss, edges_tss = np.histogram(tss_pos, bins=200, weights=tss_w)
-    smoothed_tss = np.convolve(counts_tss, np.ones(5)/5, mode='same')
-    if smoothed_tss.max()>0:
+    smoothed_tss = np.convolve(counts_tss, np.ones(5) / 5, mode='same')
+    if smoothed_tss.max() > 0:
         smoothed_tss /= smoothed_tss.max()
-    width_bin = edges_tss[1] - edges_tss[0]
-    for left_edge, h in zip(edges_tss[:-1], smoothed_tss):
-        ax.add_patch(Rectangle(
-            (left_edge, y2), width_bin, h * rect_h,
-            facecolor='blue', edgecolor='none', alpha=0.4, zorder=3
-        ))
+    ax.add_collection(rects_from_bins(edges_tss, smoothed_tss, y2, rect_h, 'blue'))
 
 
     # external labels: TTS on bottom, TSS on top
@@ -417,13 +556,10 @@ def main():
 
 
     # save
-    out_png = os.path.join(outdir, f"{genome}_{contig}_{rs}-{re_}.png")
-    plt.savefig(out_png, dpi=600, bbox_inches='tight')
+    out_png = outdir / f"{genome}_{contig}_{rs}-{re_}.png"
+    fig.savefig(out_png, bbox_inches='tight')
     plt.close(fig)
-    # print figure dimensions in pixels
-    width_in, height_in = fig.get_size_inches()
-    dpi = 600
-    width_px, height_px = int(width_in * dpi), int(height_in * dpi)
+    width_px, height_px = int(fig_w * fig.dpi), int(fig_h * fig.dpi)
     print(f"Figure dimensions: {width_px} x {height_px} pixels")
     print(f"Saved: {out_png}")
 
