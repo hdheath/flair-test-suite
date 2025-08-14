@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from . import register, write_metrics  # QC plumbing
+from .qc_utils import count_lines
 
 # If your CLI sets logging, you can remove/relax this.
 logging.basicConfig(level=logging.DEBUG)
@@ -64,13 +65,15 @@ def _read_bed6(path: Path) -> pd.DataFrame:
 def _prepare_bed6_sorted(path: Path, tmps: List[Path]) -> Path:
     trimmed = path.with_suffix(path.suffix + ".trimmed.tmp")
     sorted_p = path.with_suffix(path.suffix + ".sorted.tmp")
-    with open(trimmed, "w") as o:
-        _run(["cut", "-f", "1-6", str(path)])
-        # Note: GNU/BSD `cut` both accept "-f1-6" or "-f", "1-6". Using the latter is portable.
-        _run(["cut", "-f", "1-6", str(path)]).check_returncode()
-    with open(sorted_p, "w") as o:
-        res = _run(["bedtools", "sort", "-i", str(trimmed)])
-        o.write(res.stdout)
+
+    # Trim to first six columns of BED and write to temporary file
+    res = _run(["cut", "-f", "1-6", str(path)])
+    trimmed.write_text(res.stdout)
+
+    # Sort the trimmed BED and capture output
+    res = _run(["bedtools", "sort", "-i", str(trimmed)])
+    sorted_p.write_text(res.stdout)
+
     try:
         trimmed.unlink()
     except Exception:
@@ -170,6 +173,48 @@ def _read_map_unique_reads(map_path: Path) -> int:
     return len(uniq)
 
 
+def _audit(
+    rows: List[Dict],
+    context: str,
+    tag: str,
+    label: str,
+    path: Optional[Path],
+    *,
+    line_counter=count_lines,
+    lines: Optional[int] = None,
+    derived: Optional[Dict] = None,
+    note: str = "",
+) -> None:
+    """Append a standardized audit record for a file."""
+    exists = bool(path and path.exists())
+    size = path.stat().st_size if exists else None
+    if exists:
+        if lines is not None:
+            lines_est = lines
+        elif line_counter:
+            try:
+                lines_est = line_counter(path)
+            except Exception:
+                lines_est = None
+        else:
+            lines_est = None
+    else:
+        lines_est = None
+    rows.append(
+        {
+            "context": context,
+            "tag": tag,
+            "label": label,
+            "path": str(path) if path else None,
+            "exists": exists,
+            "size_bytes": size,
+            "lines_est": lines_est,
+            "derived_count": derived,
+            "note": note,
+        }
+    )
+
+
 # ────────────────────────── discovery helpers ──────────────────────────
 def _dirs_with_file(root: Path, stage: str, fname: str) -> List[Path]:
     base = root / stage
@@ -232,16 +277,6 @@ def _find_align_bam(run_root: Path, run_id: str) -> Optional[Path]:
         return d / f"{run_id}_flair.bam"
     return None
 
-
-def _count_nonempty_lines(path: Path) -> int:
-    n = 0
-    with open(path) as fh:
-        for line in fh:
-            if line and not line.startswith("#") and line.strip():
-                n += 1
-    return n
-
-
 def _count_primary_alignments_bam(bam: Path) -> int:
     if not _which("samtools"):
         raise RuntimeError("TED requires 'samtools' on PATH to count primary alignments from BAM.")
@@ -297,11 +332,9 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
 
         def _side(key_cfg: str, label: str) -> Tuple[Optional[float], Optional[float], Optional[float]]:
             pth = peaks.get(key_cfg)
-            if pth is None:
-                audit_rows.append({"context": tag_ctx, "tag": label, "label": f"{key_cfg}_peaks",
-                                   "path": None, "exists": False, "size_bytes": None,
-                                   "lines_est": None, "derived_count": None,
-                                   "note": "no config file"})
+            if pth is None or not pth.exists() or pth.stat().st_size == 0:
+                note = "missing" if (pth is None or not pth.exists()) else "empty"
+                _audit(audit_rows, tag_ctx, label, f"{key_cfg}_peaks", pth, note=note)
                 return None, None, None
 
             # Sort/trim peaks, too
@@ -316,15 +349,15 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
             recall = (c / t) if t else None
             f1 = _safe_f1(precision, recall)
 
-            # Audit
-            try:
-                lines_est = _count_nonempty_lines(pth)
-            except Exception:
-                lines_est = None
-            audit_rows.append({"context": tag_ctx, "tag": label, "label": f"{key_cfg}_peaks",
-                               "path": str(pth), "exists": True, "size_bytes": pth.stat().st_size,
-                               "lines_est": lines_est, "derived_count": {"matches_le_window": m, "peaks_total": t},
-                               "note": f"precision={precision}, recall={recall}, f1={f1}"})
+            _audit(
+                audit_rows,
+                tag_ctx,
+                label,
+                f"{key_cfg}_peaks",
+                pth,
+                derived={"matches_le_window": m, "peaks_total": t},
+                note=f"precision={precision}, recall={recall}, f1={f1}",
+            )
             return precision, recall, f1
 
         p5, r5, f5 = _side("prime5", "5")
@@ -422,24 +455,13 @@ def collect(stage_dir: Path, cfg) -> None:
                 logging.warning(f"[TED] Could not parse region tag from {iso_bed.name}; skipping")
                 continue
 
-            audit_rows.append({"context": "region", "tag": tag, "label": "isoforms_bed",
-                               "path": str(iso_bed), "exists": iso_bed.exists(),
-                               "size_bytes": iso_bed.stat().st_size if iso_bed.exists() else None,
-                               "lines_est": _count_nonempty_lines(iso_bed) if iso_bed.exists() else None,
-                               "derived_count": None, "note": ""})
+            _audit(audit_rows, "region", tag, "isoforms_bed", iso_bed)
 
             map_txt = stage_dir / f"{tag}.isoform.read.map.txt"
             if map_txt.exists():
-                audit_rows.append({"context": "region", "tag": tag, "label": "map_txt",
-                                   "path": str(map_txt), "exists": True,
-                                   "size_bytes": map_txt.stat().st_size,
-                                   "lines_est": _count_nonempty_lines(map_txt),
-                                   "derived_count": None, "note": ""})
+                _audit(audit_rows, "region", tag, "map_txt", map_txt)
             else:
-                audit_rows.append({"context": "region", "tag": tag, "label": "map_txt",
-                                   "path": str(map_txt), "exists": False,
-                                   "size_bytes": None, "lines_est": None,
-                                   "derived_count": None, "note": "missing"})
+                _audit(audit_rows, "region", tag, "map_txt", map_txt, note="missing")
 
             n_iso, n_genes_obs = _isoform_counts(iso_bed)
             assigned_reads = _read_map_unique_reads(map_txt)
@@ -478,30 +500,44 @@ def collect(stage_dir: Path, cfg) -> None:
                 if corr_bed is None:
                     logging.warning(f"[TED] Corrected BED for {tag} not found; assigned_pct will be None")
                     denom = None
-                    audit_rows.append({"context": "region", "tag": tag, "label": "corrected_bed",
-                                       "path": None, "exists": False, "size_bytes": None,
-                                       "lines_est": None, "derived_count": None, "note": "missing"})
+                    _audit(audit_rows, "region", tag, "corrected_bed", None, note="missing")
                 else:
-                    denom = _count_nonempty_lines(corr_bed)
-                    audit_rows.append({"context": "region", "tag": tag, "label": "corrected_bed",
-                                       "path": str(corr_bed), "exists": True,
-                                       "size_bytes": corr_bed.stat().st_size,
-                                       "lines_est": denom, "derived_count": {"denom": denom}, "note": ""})
+                    denom = count_lines(corr_bed)
+                    _audit(
+                        audit_rows,
+                        "region",
+                        tag,
+                        "corrected_bed",
+                        corr_bed,
+                        lines=denom,
+                        derived={"denom": denom},
+                    )
                     logging.debug(f"[TED] For region {tag}, corrected BED: {corr_bed.name}, lines: {denom}")
             else:
                 reg_bam = (reg_dir_for_tag / f"{tag}.bam") if reg_dir_for_tag else None
                 if reg_bam and reg_bam.exists():
                     denom = _count_primary_alignments_bam(reg_bam)
-                    audit_rows.append({"context": "region", "tag": tag, "label": "regional_bam",
-                                       "path": str(reg_bam), "exists": True,
-                                       "size_bytes": reg_bam.stat().st_size,
-                                       "lines_est": None, "derived_count": {"primary_alignments": denom}, "note": ""})
+                    _audit(
+                        audit_rows,
+                        "region",
+                        tag,
+                        "regional_bam",
+                        reg_bam,
+                        line_counter=None,
+                        derived={"primary_alignments": denom},
+                    )
                 else:
                     logging.warning(f"[TED] Regional BAM for {tag} not found; assigned_pct will be None")
                     denom = None
-                    audit_rows.append({"context": "region", "tag": tag, "label": "regional_bam",
-                                       "path": str(reg_bam) if reg_bam else None, "exists": False,
-                                       "size_bytes": None, "lines_est": None, "derived_count": None, "note": "missing"})
+                    _audit(
+                        audit_rows,
+                        "region",
+                        tag,
+                        "regional_bam",
+                        reg_bam,
+                        line_counter=None,
+                        note="missing",
+                    )
 
             row = {
                 "run_id": run_id,
@@ -529,65 +565,75 @@ def collect(stage_dir: Path, cfg) -> None:
             raise RuntimeError(f"[TED] Isoforms BED not found or empty: {iso_bed}")
         map_txt = stage_dir / f"{run_id}.isoform.read.map.txt"
 
-        audit_rows.append({"context": "single", "tag": run_id, "label": "isoforms_bed",
-                           "path": str(iso_bed), "exists": True,
-                           "size_bytes": iso_bed.stat().st_size,
-                           "lines_est": _count_nonempty_lines(iso_bed),
-                           "derived_count": None, "note": ""})
+        _audit(audit_rows, "single", run_id, "isoforms_bed", iso_bed)
 
         if map_txt.exists():
-            audit_rows.append({"context": "single", "tag": run_id, "label": "map_txt",
-                               "path": str(map_txt), "exists": True,
-                               "size_bytes": map_txt.stat().st_size,
-                               "lines_est": _count_nonempty_lines(map_txt),
-                               "derived_count": None, "note": ""})
+            _audit(audit_rows, "single", run_id, "map_txt", map_txt)
         else:
-            audit_rows.append({"context": "single", "tag": run_id, "label": "map_txt",
-                               "path": str(map_txt), "exists": False,
-                               "size_bytes": None, "lines_est": None,
-                               "derived_count": None, "note": "missing"})
+            _audit(audit_rows, "single", run_id, "map_txt", map_txt, note="missing")
 
         n_iso, n_genes_obs = _isoform_counts(iso_bed)
         assigned_reads = _read_map_unique_reads(map_txt)
         logging.debug(f"[TED] Single mode - n_iso: {n_iso}, n_genes_obs: {n_genes_obs}, assigned_reads: {assigned_reads}")
 
         # peaks: global only
-        peaks = {k: (_resolve(v, data_dir) if v else None) for k, v in peaks_cfg.items()}
-        logging.debug(f"[TED] Single mode peaks resolved: { {k: str(v) if v else None for k,v in peaks.items()} }")
+        peaks = {}
+        for key, conf in peaks_cfg.items():
+            if not conf:
+                peaks[key] = None
+                continue
+            rp = _resolve(conf, data_dir)
+            if rp and rp.exists() and rp.stat().st_size > 0:
+                peaks[key] = rp
+            else:
+                peaks[key] = None
+        logging.debug(f"[TED] Single mode peaks resolved: { {k: str(v) if v else None for k, v in peaks.items()} }")
         tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, "single")
 
         if stage_name == "collapse":
             corr_bed = _find_correct_bed_single(run_root, run_id)
             if corr_bed:
-                denom = _count_nonempty_lines(corr_bed)
-                audit_rows.append({"context": "single", "tag": run_id, "label": "corrected_bed",
-                                   "path": str(corr_bed), "exists": True,
-                                   "size_bytes": corr_bed.stat().st_size,
-                                   "lines_est": denom, "derived_count": {"denom": denom}, "note": ""})
+                denom = count_lines(corr_bed)
+                _audit(
+                    audit_rows,
+                    "single",
+                    run_id,
+                    "corrected_bed",
+                    corr_bed,
+                    lines=denom,
+                    derived={"denom": denom},
+                )
                 logging.debug(f"[TED] Found single corrected BED: {corr_bed.name} with {denom} lines")
             else:
                 logging.warning("[TED] Single corrected BED not found; assigned_pct will be None")
                 denom = None
-                audit_rows.append({"context": "single", "tag": run_id, "label": "corrected_bed",
-                                   "path": None, "exists": False,
-                                   "size_bytes": None, "lines_est": None,
-                                   "derived_count": None, "note": "missing"})
+                _audit(audit_rows, "single", run_id, "corrected_bed", None, note="missing")
         else:
             aln_bam = _find_align_bam(run_root, run_id)
             if aln_bam:
                 denom = _count_primary_alignments_bam(aln_bam)
-                audit_rows.append({"context": "single", "tag": run_id, "label": "align_bam",
-                                   "path": str(aln_bam), "exists": True,
-                                   "size_bytes": aln_bam.stat().st_size,
-                                   "lines_est": None, "derived_count": {"primary_alignments": denom}, "note": ""})
+                _audit(
+                    audit_rows,
+                    "single",
+                    run_id,
+                    "align_bam",
+                    aln_bam,
+                    line_counter=None,
+                    derived={"primary_alignments": denom},
+                )
                 logging.debug(f"[TED] Found single align BAM: {aln_bam.name}")
             else:
                 logging.warning("[TED] Align BAM not found; assigned_pct will be None")
                 denom = None
-                audit_rows.append({"context": "single", "tag": run_id, "label": "align_bam",
-                                   "path": None, "exists": False,
-                                   "size_bytes": None, "lines_est": None,
-                                   "derived_count": None, "note": "missing"})
+                _audit(
+                    audit_rows,
+                    "single",
+                    run_id,
+                    "align_bam",
+                    None,
+                    line_counter=None,
+                    note="missing",
+                )
 
         row = {
             "run_id": run_id,
@@ -608,7 +654,21 @@ def collect(stage_dir: Path, cfg) -> None:
 
     # write TSV
     out_tsv = stage_dir / "TED.tsv"
-    pd.DataFrame(rows).to_csv(out_tsv, sep="\t", index=False)
+    df = pd.DataFrame(rows)
+    if is_regionalized:
+        df.to_csv(out_tsv, sep="\t", index=False)
+    else:
+        drop_cols = [
+            "region_tag",
+            "chrom",
+            "start",
+            "end",
+            "span_bp",
+            "region_genes_expected",
+            "region_isoforms_expected",
+        ]
+        df.drop(columns=drop_cols, inplace=True)
+        df.to_csv(out_tsv, sep="\t", index=False)
     logging.info(f"[TED] Wrote TED.tsv with {len(rows)} rows at {out_tsv}")
 
     # write AUDIT TSV
