@@ -8,6 +8,12 @@ from typing import List, Tuple
 
 from .base import StageBase
 from .stage_utils import read_region_details, make_flair_cmd
+
+# Ensure TED QC is registered for this stage even if QC package isn't imported elsewhere
+try:  # pragma: no cover - best effort, optional dependency
+    from ..qc import ted as _force_import_ted  # noqa: F401
+except Exception:  # pragma: no cover - missing heavy deps
+    pass
 class TranscriptomeStage(StageBase):
     """
     FLAIR transcriptome stage (v3+)
@@ -179,8 +185,14 @@ class TranscriptomeStage(StageBase):
                 "isoforms_gtf": Path(f"{base}.isoforms.gtf"),
             }
 
-    # No registered QC collector by default; keep hook minimal
-    def collect_qc(self, pb):
-        return {}
+    def _run_qc(self, stage_dir: Path, primary: Path, runtime: float | None) -> dict:
+        qc: dict = {}
+        try:
+            from ..qc.ted import collect as ted_collect
+            ted_collect(stage_dir, self.cfg)
+            qc["TED"] = {"tsv": str(stage_dir / "TED.tsv")}
+        except Exception as e:  # pragma: no cover - logging only
+            logging.warning(f"[transcriptome] TED QC failed: {e}")
+        return qc
 
 
