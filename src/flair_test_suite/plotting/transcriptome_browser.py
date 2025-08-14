@@ -46,8 +46,8 @@ from matplotlib.collections import PatchCollection, LineCollection
 
 @dataclass(frozen=True)
 class Config:
-    bam: Optional[Path] = None
     gtf: Path
+    bam: Optional[Path] = None
     genome: str = ""
     outdir: Path = Path(".")
     mapping: Optional[Path] = None
