@@ -4,7 +4,7 @@ A testing pipeline to:
 
 - **FLAIR Align** with user inputted options
 - **FLAIR Correct** with user inputted options
-- **Slice** input data into user inputted region-specific files  
+- **Regionalized** input data into user inputted region-specific files  
 - **FLAIR Collapse** each region with user inputted options  
 - **FLAIR Collapse QC** with SQANTI3 and **plot** results  
 - **FLAIR Collapse QC** with TED and **plot** results  
@@ -45,7 +45,7 @@ A testing pipeline to:
 
 ---
 
-### **Slice**
+### **Regionalized**
 
 **Inputs:**
 - Region(s) of interest: `chr:start-end`
@@ -56,7 +56,7 @@ A testing pipeline to:
 - *optional*: TSS/TTS BED files (reference or experimental)
 
 **Outputs:**
-- Sliced files of each region from the input files  
+- Regionalized files of each region from the input files  
   **Note:** Only features *fully contained* within the given region of interest will be included in the output file
 
 ---
@@ -65,16 +65,16 @@ A testing pipeline to:
 
 **Inputs for version < 3**
 - `reference.fasta`
-- Sliced `reference.gtf`
-- Sliced, corrected, aligned `bed` file
-- Sliced, corrected, aligned `reads.fasta` file
-- [optional] sliced junctions tab file 
+- Regionalized `reference.gtf`
+- Regionalized, corrected, aligned `bed` file
+- Regionalized, corrected, aligned `reads.fasta` file
+- [optional] Regionalized junctions tab file 
 
 **Inputs for version >= 3**
 - `reference.fasta`
-- Sliced `reference.gtf`
-- Sliced, `bam` file
-- [optional] sliced junctions tab file 
+- Regionalized `reference.gtf`
+- Regionalized, `bam` file
+- [optional] Regionalized junctions tab file 
 
 **Outputs:**
 - (TBD)
@@ -138,7 +138,7 @@ A testing pipeline to:
 │               │   ├── <sample>.corrected.bam
 │               │   └── <sample>.corrected.bed
 │               │
-│               ├── regions/                     # sliced files used for FLAIR collapse runs
+│               ├── regions/                     # Regionalizedd files used for FLAIR collapse runs
 │               │   └── chr20_3218000_3250000/
 │               │       ├── raw/                 
 │               │       │   ├── chr20…-3250000.bam

@@ -8,7 +8,7 @@
 
 * For targeted region runs:
 
-  * Include the `slice` stage in your template.
+  * Include the `regionalize` stage in your template.
   * Create a 3‑column TSV file (e.g., `regions.tsv`) with columns: `chr`, `start`, `end`.
   * Save `regions.tsv` in the same directory as your input data.
 
@@ -17,9 +17,9 @@
 Select one of the four supported workflows and copy its template from `configs/`:
 
 1. **Align → Correct → Collapse**
-2. **Align → Slice → Correct → Collapse**
+2. **Align → Regionalize → Correct → Collapse**
 3. **Align → Transcriptome** (requires **FLAIR ≥ 3.0**)
-4. **Align → Slice → Transcriptome** (requires **FLAIR ≥ 3.0**)
+4. **Align → Regionalize → Transcriptome** (requires **FLAIR ≥ 3.0**)
 
 ## Editing and Saving Templates
 
@@ -46,7 +46,7 @@ Once you have selected and copied a template, you can edit it by :
 
 ```toml
 # ------------------------------------------------------------------------------------------------------------
-# Align -> Correct -> Slice -> Collapse Configuration
+# Align -> Correct -> Regionalize -> Collapse Configuration
 # ------------------------------------------------------------------------------------------------------------
 # -------------------------------------------- Test Case Description -----------------------------------------
 # 
@@ -98,11 +98,11 @@ gtf          = "hs_GENCODE38.basic_annotation.gtf"
 junction_bed = "WTC11_all.SJ.out.tab"
 
 # ------------------------------------------------------------------------------------------------------------
-# -------- SLICE ----------------------------------------------------
+# -------- REGIONALIZE ----------------------------------------------------
 # ------------------------------------------------------------------------------------------------------------
 
 [[run.stages]]
-name     = "slice"
+name     = "regionalize"
 requires = ["correct"]
 
 [run.stages.flags]
@@ -120,7 +120,7 @@ reference_3_prime_regions_bed_file  = ""                          # optional
 
 [[run.stages]]
 name     = "collapse"
-requires = ["slice"]
+requires = ["regionalize"]
 
 [run.stages.flags]
                   # Note : No flags, so default settings for collapse used

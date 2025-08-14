@@ -19,7 +19,7 @@ This FLAIR test suite provides the means for running and benchmarking different 
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test_case`  | A documented config file that contains reasoning and the blueprint for a complete FLAIR workflow from raw reads through FLAIR quantify with self-contained stage options at each step.                                         |
 | `run`        | An end-to-end execution of a `test_case` (identified by `run_id`).                                                                                                                                                                |
-| `stage`      | One FLAIR sub-command (`align`, `correct`, `slice`, `collapse`, `transcriptome`).                                                                                                                                                |
+| `stage`      | One FLAIR sub-command (`align`, `correct`, `regionalize`, `collapse`, `transcriptome`).                                                                                                                                                |
 | `flags`      | CLI options under `[run.stages.flags]`.                                                                                                                                                                                          |
 | `signature`  | The name of the directory under `<stage>` (e.g. `align/abcd1234`), based on the signature string <code>`tool_version \| flags \| input_hashes`</code>. Helps determine if a stage has already been completed and can be skipped. |
 
@@ -58,7 +58,7 @@ Test cases are also defined by region. A region is a genomic coordinate where we
 
 - **Targeted Region Tests**  
   Run on a limited locus or small gene set (e.g., reads mapping to chr21 or a single gene). Cover challenging regions (e.g., high gene density, pseudogenes, repetitive sequences). Helps ensure corner cases are regularly checked and helps select quick tests for fast feedback.  
-**⚠️ Note:** **To implement a targeted region test** use a template that includes the `slice` stage. 
+**⚠️ Note:** **To implement a targeted region test** use a template that includes the `regionalize` stage. 
 
 - **Whole-Transcriptome Tests**  
   Run on genome-wide data (e.g., whole human transcriptome) to ensure the pipeline scales to full dataset sizes and complexities.
@@ -70,7 +70,7 @@ Test cases are further defined by the **FLAIR version** that is ran.
 | FLAIR tag | Supported stages                               |
 | --------- | ---------------------------------------------- |
 | **2.x**   | align, correct, collapse                       |
-| **3.x**   | align, correct, slice, collapse, transcriptome |
+| **3.x**   | align, correct, regionalize, collapse, transcriptome |
 
 
 ---
@@ -104,7 +104,7 @@ The test suite expects the user to have, at bare minimum :
 | --------------- | --------------------- | ----------------------------------------------------------- |
 | `align`         | BAM + BED             | MAPQ, read identity/length, unique junctions, splice motifs |
 | `correct`       | corrected BED         | reads removed %, unique junctions, splice-motifs            |
-| `slice`         | region BAM/BED/FA/GTF | feature counts from GTF (e.g., number of genes)             |
+| `regionalize`         | region BAM/BED/FA/GTF | feature counts from GTF (e.g., number of genes)             |
 | `collapse`      | isoforms BED/GTF      | *QC TBD*                                                    |
 | `transcriptome` | isoforms BED/GTF      | *QC TBD*                                                    |
 
@@ -124,7 +124,7 @@ outputs/
     ├── run_summary.log
     ├── align/<sig>/
     ├── correct/<sig>/
-    ├── slice/<sig>/
+    ├── regionalize/<sig>/
     ├── collapse/<sig>/
     └── transcriptome/<sig>/
 ```
