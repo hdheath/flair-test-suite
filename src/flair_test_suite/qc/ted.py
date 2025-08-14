@@ -12,6 +12,7 @@ import pandas as pd
 
 from . import register, write_metrics  # QC plumbing
 from .qc_utils import count_lines
+from ..plotting import transcriptome_browser
 
 # If your CLI sets logging, you can remove/relax this.
 logging.basicConfig(level=logging.DEBUG)
@@ -473,6 +474,7 @@ def collect(stage_dir: Path, cfg) -> None:
             reg_tx_cnt   = int(reg_rec.get("transcript_count", 0) or 0)
             reg_dir_for_tag: Optional[Path] = reg_rec.get("reg_dir")
             logging.debug(f"[TED] For region {tag}, expected genes: {reg_gene_cnt}, transcripts: {reg_tx_cnt}")
+            reg_bam = (reg_dir_for_tag / f"{tag}.bam") if reg_dir_for_tag else None
 
             # peaks: prefer sliced if available
             peaks = {}
@@ -514,7 +516,6 @@ def collect(stage_dir: Path, cfg) -> None:
                     )
                     logging.debug(f"[TED] For region {tag}, corrected BED: {corr_bed.name}, lines: {denom}")
             else:
-                reg_bam = (reg_dir_for_tag / f"{tag}.bam") if reg_dir_for_tag else None
                 if reg_bam and reg_bam.exists():
                     denom = _count_primary_alignments_bam(reg_bam)
                     _audit(
@@ -558,6 +559,31 @@ def collect(stage_dir: Path, cfg) -> None:
             if reg_dir_for_tag is None:
                 logging.debug(f"[TED] No regionalize index entry for {tag}; expected metrics defaulted to 0")
             rows.append(row)
+
+            # ── Optional transcriptome browser plot ──
+            try:
+                gtf_path = stage_dir / f"{tag}.isoforms.gtf"
+                if reg_bam and gtf_path.exists():
+                    outdir = stage_dir / "transcriptome_browser"
+                    cfg_tb = transcriptome_browser.Config(
+                        bam=reg_bam,
+                        gtf=gtf_path,
+                        genome=str(run_id),
+                        outdir=outdir,
+                        mapping=map_txt if map_txt.exists() else None,
+                        collapsed_isoforms=iso_bed,
+                    )
+                    transcriptome_browser.generate(
+                        cfg_tb, region=f"{chrom}:{start_i}-{end_i}"
+                    )
+                else:
+                    logging.warning(
+                        f"[TED] Skipping transcriptome browser for {tag}: missing BAM or GTF"
+                    )
+            except Exception as e:
+                logging.warning(
+                    f"[TED] transcriptome browser failed for region {tag}: {e}"
+                )
     else:
         # ── Single (non-regionalized): one row ──
         iso_bed = stage_dir / f"{run_id}.isoforms.bed"

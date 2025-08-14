@@ -32,7 +32,7 @@ import argparse
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 from collections import defaultdict
 from itertools import chain
 
@@ -221,25 +221,40 @@ def assign_read_rows(blocks_list):
             assign.append(len(rows) - 1)
     return assign, len(rows)
 
+def _parse_region(region: Optional[str]) -> Optional[Tuple[str, int, int]]:
+    """Parse a region string like 'chr1:100-200' into a tuple."""
+    if not region:
+        return None
+    try:
+        chrom, start, end = region.replace(":", "\t").replace("-", "\t").split("\t")
+        start_i, end_i = int(start), int(end)
+    except Exception:
+        logging.warning(f"Could not parse region string: {region}")
+        return None
+    if end_i - start_i >= 20000:
+        logging.warning("Region length >= 20000bp; skipping plot")
+        return None
+    return chrom, start_i, end_i
 
-def main():
-    args = parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    cfg = Config.from_json(args.config)
 
-    region_tuple = None
-    if args.region:
-        chrom, start, end = args.region.replace(":", "\t").replace("-", "\t").split("\t")
-        start, end = int(start), int(end)
-        if end - start >= 20000:
-            logging.warning("Region length >= 20000bp; skipping plot")
-            return
-        region_tuple = (chrom, start, end)
+def generate(cfg: Config, region: Optional[str] = None) -> None:
+    """Generate transcriptome browser plot from configuration."""
+    region_tuple = _parse_region(region)
 
     bam = cfg.bam
     gtf = cfg.gtf
-    mapping_file = cfg.mapping
-    cis_bed = cfg.collapsed_isoforms
+    if not bam.exists():
+        logging.warning(f"BAM not found: {bam}")
+        return
+    if not gtf.exists():
+        logging.warning(f"GTF not found: {gtf}")
+        return
+    mapping_file = cfg.mapping if cfg.mapping and cfg.mapping.exists() else None
+    if cfg.mapping and not mapping_file:
+        logging.warning(f"Mapping not found: {cfg.mapping}")
+    cis_bed = cfg.collapsed_isoforms if cfg.collapsed_isoforms and cfg.collapsed_isoforms.exists() else None
+    if cfg.collapsed_isoforms and not cis_bed:
+        logging.warning(f"Collapsed isoforms BED not found: {cfg.collapsed_isoforms}")
     genome = cfg.genome
     outdir = cfg.outdir
     gene_h = cfg.gene_height
@@ -562,6 +577,13 @@ def main():
     width_px, height_px = int(fig_w * fig.dpi), int(fig_h * fig.dpi)
     print(f"Figure dimensions: {width_px} x {height_px} pixels")
     print(f"Saved: {out_png}")
+
+
+def main():
+    args = parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    cfg = Config.from_json(args.config)
+    generate(cfg, args.region)
 
 
 if __name__ == '__main__':
