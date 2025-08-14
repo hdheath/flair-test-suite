@@ -375,6 +375,10 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
             st, en = int(row.start), int(row.end)
         if st is None:
             logging.warning(f"No collapsed bar for {iso}")
+            # Treat reads from this isoform as unassigned so they can
+            # still be displayed rather than leaving their rows as None
+            # (which causes errors later when computing layout).
+            unassigned.extend(idxs)
             continue
 
         left = min(reads_blocks[j][0][0] for j in idxs)
