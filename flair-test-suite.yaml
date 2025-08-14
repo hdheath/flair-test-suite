@@ -4,9 +4,9 @@ channels:
   - defaults
 
 dependencies:
-  - python>=3.11         # or >=3.10
-  - flair                 # FLAIR CLI installed via conda-forge
-  - samtools              # required by QC
-  - pip                   # so we can pip-install our package
+  - python>=3.11
+  - samtools
+  - bedtools
+  - pip
   - pip:
     - -e .
