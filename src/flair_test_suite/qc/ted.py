@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -26,8 +27,9 @@ def _which(exe: str) -> bool:
 def _resolve(p: Optional[str], data_dir: Path) -> Optional[Path]:
     if not p:
         return None
-    pp = Path(p)
-    return (data_dir / p) if not pp.is_absolute() else pp
+    expanded = os.path.expanduser(os.path.expandvars(p))
+    pp = Path(expanded)
+    return (data_dir / pp).resolve() if not pp.is_absolute() else pp
 
 
 def _run(cmd: List[str]) -> subprocess.CompletedProcess:
@@ -308,7 +310,20 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
     If a file is missing, that side returns None for all three metrics.
     """
     have_any = any(peaks.values())
-    if have_any and not _which("bedtools"):
+    metrics: Dict[str, Optional[float]] = {
+        "5prime_precision": None, "5prime_recall": None, "5prime_f1": None,
+        "3prime_precision": None, "3prime_recall": None, "3prime_f1": None,
+        "ref5prime_precision": None, "ref5prime_recall": None, "ref5prime_f1": None,
+        "ref3prime_precision": None, "ref3prime_recall": None, "ref3prime_f1": None,
+    }
+    if not have_any:
+        for key_cfg, label in [
+            ("prime5", "5"), ("prime3", "3"), ("ref_prime5", "ref5"), ("ref_prime3", "ref3"),
+        ]:
+            _audit(audit_rows, tag_ctx, label, f"{key_cfg}_peaks", peaks.get(key_cfg), note="missing")
+        return metrics
+
+    if not _which("bedtools"):
         raise RuntimeError("TED requires 'bedtools' on PATH when TSS/TTS files are provided.")
 
     full_bed_df = pd.read_csv(
@@ -321,15 +336,6 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
     bed_df = full_bed_df[["Chrom", "Start", "End", "Strand"]]
 
     tmp_local: List[Path] = []
-    metrics: Dict[str, Optional[float]] = {
-        "5prime_precision": None, "5prime_recall": None, "5prime_f1": None,
-        "3prime_precision": None, "3prime_recall": None, "3prime_f1": None,
-        "ref5prime_precision": None, "ref5prime_recall": None, "ref5prime_f1": None,
-        "ref3prime_precision": None, "ref3prime_recall": None, "ref3prime_f1": None,
-    }
-    if not have_any:
-        return metrics
-
     try:
         bed_sorted = _prepare_bed6_sorted(iso_bed, tmp_local)
 
@@ -423,15 +429,13 @@ def collect(stage_dir: Path, cfg) -> None:
     if data_dir_cfg.is_absolute():
         data_dir = data_dir_cfg
     else:
-        # ``stage_dir`` resides at ``<repo>/outputs/<run>/<stage>/<hash>``
-        # so the repository root is two levels above ``run_root``.  The
-        # previous implementation only went one level up which resolved
-        # the data directory relative to ``outputs`` instead of the repo
-        # root, leaving non-regionalized runs unable to locate the
-        # TSS/TTS BED files specified in the config.  Adjust the path so
-        # relative ``data_dir`` entries are interpreted from the project
-        # root.
-        repo_root = run_root.parent.parent
+        # ``stage_dir`` lives at ``<repo>/outputs/<run>/<stage>/<hash>``. The
+        # project root is therefore two levels above ``run_root``.  Earlier the
+        # code only ascended once, resolving relative ``data_dir`` entries
+        # against ``outputs`` and causing non-regionalized runs to miss the
+        # configured TSS/TTS BED files.  Walk up to the project root before
+        # joining with ``data_dir``.
+        repo_root = run_root.parents[1]
         data_dir = (repo_root / data_dir_cfg).resolve()
     logging.debug(f"[TED] Data directory set to: {data_dir}")
 
