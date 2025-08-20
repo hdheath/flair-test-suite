@@ -440,6 +440,7 @@ def collect(stage_dir: Path, cfg) -> None:
     logging.debug(f"[TED] Data directory set to: {data_dir}")
 
     # Optional QC block
+    # For regionalized runs, try to get TSS/TTS config from [run.stages.flags] if not present in [qc.collapse.TED]
     qc_block = _cfg_get(["qc", stage_name, "TED"], {}) or {}
     window = int(qc_block.get("window", 50))
     logging.debug(f"[TED] Window: {window}")
@@ -449,7 +450,14 @@ def collect(stage_dir: Path, cfg) -> None:
         "ref_prime5": qc_block.get("reference_5_prime_regions_bed_file"),
         "ref_prime3": qc_block.get("reference_3_prime_regions_bed_file"),
     }
-    logging.debug(f"[TED] Peaks configuration (raw): {peaks_cfg}")
+    # If any are missing, try to get from [run.stages.flags] for the current stage
+    if not all(peaks_cfg.values()):
+        stage_flags = _cfg_get(["run", "stages", stage_name, "flags"], {}) or {}
+        for k, config_key in zip(["prime5", "prime3", "ref_prime5", "ref_prime3"],
+                                 ["experiment_5_prime_regions_bed_file", "experiment_3_prime_regions_bed_file", "reference_5_prime_regions_bed_file", "reference_3_prime_regions_bed_file"]):
+            if not peaks_cfg[k]:
+                peaks_cfg[k] = stage_flags.get(config_key)
+    logging.debug(f"[TED] Peaks configuration (final): {peaks_cfg}")
 
     # Build region metrics index across ALL regionalize runs
     reg_index = _build_region_metrics_index(run_root)
