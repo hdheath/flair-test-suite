@@ -32,6 +32,25 @@ def _resolve(p: Optional[str], data_dir: Path) -> Optional[Path]:
     return (data_dir / pp).resolve() if not pp.is_absolute() else pp
 
 
+def _cfg_get(cfg_obj, path: List[str], default=None):
+    """Safely walk a mixed object/``dict`` config structure.
+
+    ``cfg`` may be a ``dynaconf`` object (attribute access) or a simple
+    ``dict``.  This helper mirrors the inlined logic that previously lived in
+    :func:`collect` and allows reuse in small helpers below.
+    """
+    cur = cfg_obj
+    try:
+        for k in path:
+            cur = getattr(cur, k)
+        return cur
+    except Exception:
+        cur = cfg_obj
+        for k in path:
+            cur = cur.get(k, {}) if isinstance(cur, dict) else {}
+        return cur if cur != {} else default
+
+
 def _run(cmd: List[str]) -> subprocess.CompletedProcess:
     logging.debug(f"[TED] RUN: {' '.join(cmd)}")
     try:
@@ -176,6 +195,40 @@ def _read_map_unique_reads(map_path: Path) -> int:
                 if rid:
                     uniq.add(rid)
     return len(uniq)
+
+
+def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, Optional[str]], int]:
+    """Collect peak file configuration for a stage.
+
+    Peak BED paths may be specified either under ``[qc.<stage>.TED]`` or as
+    flags in ``[run.stages.<stage>.flags]``.  The latter is a common case when
+    running regionalized pipelines where the QC section is omitted to keep
+    configuration minimal.  This helper merges the two sources and returns both
+    the resolved mapping and the window size.
+    """
+
+    qc_block = _cfg_get(cfg, ["qc", stage_name, "TED"], {}) or {}
+    window = int(qc_block.get("window", 50))
+    peaks_cfg = {
+        "prime5": qc_block.get("experiment_5_prime_regions_bed_file"),
+        "prime3": qc_block.get("experiment_3_prime_regions_bed_file"),
+        "ref_prime5": qc_block.get("reference_5_prime_regions_bed_file"),
+        "ref_prime3": qc_block.get("reference_3_prime_regions_bed_file"),
+    }
+
+    if not all(peaks_cfg.values()):
+        stage_flags = _cfg_get(cfg, ["run", "stages", stage_name, "flags"], {}) or {}
+        mapping = {
+            "prime5": "experiment_5_prime_regions_bed_file",
+            "prime3": "experiment_3_prime_regions_bed_file",
+            "ref_prime5": "reference_5_prime_regions_bed_file",
+            "ref_prime3": "reference_3_prime_regions_bed_file",
+        }
+        for key, config_key in mapping.items():
+            if not peaks_cfg[key]:
+                peaks_cfg[key] = stage_flags.get(config_key)
+
+    return peaks_cfg, window
 
 
 def _audit(
@@ -412,20 +465,7 @@ def collect(stage_dir: Path, cfg) -> None:
     run_id = run_root.name
     logging.debug(f"[TED] Stage name: {stage_name}, Run ID: {run_id}")
 
-    # cfg access helper (object or dict)
-    def _cfg_get(path: List[str], default=None):
-        cur = cfg
-        try:
-            for k in path:
-                cur = getattr(cur, k)
-            return cur
-        except Exception:
-            cur = cfg
-            for k in path:
-                cur = cur.get(k, {}) if isinstance(cur, dict) else {}
-            return cur if cur != {} else default
-
-    data_dir_cfg = Path(_cfg_get(["run", "data_dir"], "."))
+    data_dir_cfg = Path(_cfg_get(cfg, ["run", "data_dir"], "."))
     if data_dir_cfg.is_absolute():
         data_dir = data_dir_cfg
     else:
@@ -439,24 +479,8 @@ def collect(stage_dir: Path, cfg) -> None:
         data_dir = (repo_root / data_dir_cfg).resolve()
     logging.debug(f"[TED] Data directory set to: {data_dir}")
 
-    # Optional QC block
-    # For regionalized runs, try to get TSS/TTS config from [run.stages.flags] if not present in [qc.collapse.TED]
-    qc_block = _cfg_get(["qc", stage_name, "TED"], {}) or {}
-    window = int(qc_block.get("window", 50))
+    peaks_cfg, window = _build_peaks_cfg(cfg, stage_name)
     logging.debug(f"[TED] Window: {window}")
-    peaks_cfg = {
-        "prime5": qc_block.get("experiment_5_prime_regions_bed_file"),
-        "prime3": qc_block.get("experiment_3_prime_regions_bed_file"),
-        "ref_prime5": qc_block.get("reference_5_prime_regions_bed_file"),
-        "ref_prime3": qc_block.get("reference_3_prime_regions_bed_file"),
-    }
-    # If any are missing, try to get from [run.stages.flags] for the current stage
-    if not all(peaks_cfg.values()):
-        stage_flags = _cfg_get(["run", "stages", stage_name, "flags"], {}) or {}
-        for k, config_key in zip(["prime5", "prime3", "ref_prime5", "ref_prime3"],
-                                 ["experiment_5_prime_regions_bed_file", "experiment_3_prime_regions_bed_file", "reference_5_prime_regions_bed_file", "reference_3_prime_regions_bed_file"]):
-            if not peaks_cfg[k]:
-                peaks_cfg[k] = stage_flags.get(config_key)
     logging.debug(f"[TED] Peaks configuration (final): {peaks_cfg}")
 
     # Build region metrics index across ALL regionalize runs
