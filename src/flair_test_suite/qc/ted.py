@@ -487,7 +487,6 @@ def collect(stage_dir: Path, cfg) -> None:
     reg_index = _build_region_metrics_index(run_root)
 
     rows: List[Dict] = []
-    audit_rows: List[Dict] = []
 
     # Determine if this is regionalized by matching chr_start_end pattern
     iso_beds = sorted(stage_dir.glob("*.isoforms.bed"))
@@ -509,13 +508,12 @@ def collect(stage_dir: Path, cfg) -> None:
                 logging.warning(f"[TED] Could not parse region tag from {iso_bed.name}; skipping")
                 continue
 
-            _audit(audit_rows, "region", tag, "isoforms_bed", iso_bed)
+            if not iso_bed.exists():
+                logging.warning(f"[TED] Isoforms BED for region {tag} not found: {iso_bed}")
 
             map_txt = stage_dir / f"{tag}.isoform.read.map.txt"
-            if map_txt.exists():
-                _audit(audit_rows, "region", tag, "map_txt", map_txt)
-            else:
-                _audit(audit_rows, "region", tag, "map_txt", map_txt, note="missing")
+            if not map_txt.exists():
+                logging.warning(f"[TED] Isoform read map for region {tag} not found: {map_txt}")
 
             n_iso, n_genes_obs = _isoform_counts(iso_bed)
             assigned_reads = _read_map_unique_reads(map_txt)
@@ -542,11 +540,13 @@ def collect(stage_dir: Path, cfg) -> None:
                     peaks[key] = sliced
                 else:
                     rp = _resolve(conf, data_dir)
+                    if not (rp and rp.exists() and rp.stat().st_size > 0):
+                        logging.warning(f"[TED] Peaks file for key '{key}' and region {tag} not found: {conf}")
                     peaks[key] = rp if (rp and rp.exists() and rp.stat().st_size > 0) else None
 
             logging.debug(f"[TED] For region {tag}, resolved peaks: { {k: str(v) if v else None for k,v in peaks.items()} }")
 
-            tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, f"region:{tag}")
+            tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, [], f"region:{tag}")
             logging.debug(f"[TED] Region {tag} TSS/TTS metrics: {tss_tts}")
 
             # Denominator per rule
@@ -555,43 +555,15 @@ def collect(stage_dir: Path, cfg) -> None:
                 if corr_bed is None:
                     logging.warning(f"[TED] Corrected BED for {tag} not found; assigned_pct will be None")
                     denom = None
-                    _audit(audit_rows, "region", tag, "corrected_bed", None, note="missing")
                 else:
                     denom = count_lines(corr_bed)
-                    _audit(
-                        audit_rows,
-                        "region",
-                        tag,
-                        "corrected_bed",
-                        corr_bed,
-                        lines=denom,
-                        derived={"denom": denom},
-                    )
                     logging.debug(f"[TED] For region {tag}, corrected BED: {corr_bed.name}, lines: {denom}")
             else:
                 if reg_bam and reg_bam.exists():
                     denom = _count_primary_alignments_bam(reg_bam)
-                    _audit(
-                        audit_rows,
-                        "region",
-                        tag,
-                        "regional_bam",
-                        reg_bam,
-                        line_counter=None,
-                        derived={"primary_alignments": denom},
-                    )
                 else:
                     logging.warning(f"[TED] Regional BAM for {tag} not found; assigned_pct will be None")
                     denom = None
-                    _audit(
-                        audit_rows,
-                        "region",
-                        tag,
-                        "regional_bam",
-                        reg_bam,
-                        line_counter=None,
-                        note="missing",
-                    )
 
             row = {
                 "run_id": run_id,
@@ -643,13 +615,8 @@ def collect(stage_dir: Path, cfg) -> None:
         if not iso_bed.exists() or iso_bed.stat().st_size == 0:
             raise RuntimeError(f"[TED] Isoforms BED not found or empty: {iso_bed}")
         map_txt = stage_dir / f"{run_id}.isoform.read.map.txt"
-
-        _audit(audit_rows, "single", run_id, "isoforms_bed", iso_bed)
-
-        if map_txt.exists():
-            _audit(audit_rows, "single", run_id, "map_txt", map_txt)
-        else:
-            _audit(audit_rows, "single", run_id, "map_txt", map_txt, note="missing")
+        if not map_txt.exists():
+            logging.warning(f"[TED] Isoform read map not found: {map_txt}")
 
         n_iso, n_genes_obs = _isoform_counts(iso_bed)
         assigned_reads = _read_map_unique_reads(map_txt)
@@ -662,57 +629,28 @@ def collect(stage_dir: Path, cfg) -> None:
                 peaks[key] = None
                 continue
             rp = _resolve(conf, data_dir)
-            if rp and rp.exists() and rp.stat().st_size > 0:
-                peaks[key] = rp
-            else:
-                peaks[key] = None
+            if not (rp and rp.exists() and rp.stat().st_size > 0):
+                logging.warning(f"[TED] Peaks file for key '{key}' not found: {conf}")
+            peaks[key] = rp if (rp and rp.exists() and rp.stat().st_size > 0) else None
         logging.debug(f"[TED] Single mode peaks resolved: { {k: str(v) if v else None for k, v in peaks.items()} }")
-        tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, "single")
+        tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, [], "single")
 
         if stage_name == "collapse":
             corr_bed = _find_correct_bed_single(run_root, run_id)
             if corr_bed:
                 denom = count_lines(corr_bed)
-                _audit(
-                    audit_rows,
-                    "single",
-                    run_id,
-                    "corrected_bed",
-                    corr_bed,
-                    lines=denom,
-                    derived={"denom": denom},
-                )
                 logging.debug(f"[TED] Found single corrected BED: {corr_bed.name} with {denom} lines")
             else:
                 logging.warning("[TED] Single corrected BED not found; assigned_pct will be None")
                 denom = None
-                _audit(audit_rows, "single", run_id, "corrected_bed", None, note="missing")
         else:
             aln_bam = _find_align_bam(run_root, run_id)
             if aln_bam:
                 denom = _count_primary_alignments_bam(aln_bam)
-                _audit(
-                    audit_rows,
-                    "single",
-                    run_id,
-                    "align_bam",
-                    aln_bam,
-                    line_counter=None,
-                    derived={"primary_alignments": denom},
-                )
                 logging.debug(f"[TED] Found single align BAM: {aln_bam.name}")
             else:
                 logging.warning("[TED] Align BAM not found; assigned_pct will be None")
                 denom = None
-                _audit(
-                    audit_rows,
-                    "single",
-                    run_id,
-                    "align_bam",
-                    None,
-                    line_counter=None,
-                    note="missing",
-                )
 
         row = {
             "run_id": run_id,
@@ -750,12 +688,7 @@ def collect(stage_dir: Path, cfg) -> None:
         df.to_csv(out_tsv, sep="\t", index=False)
     logging.info(f"[TED] Wrote TED.tsv with {len(rows)} rows at {out_tsv}")
 
-    # write AUDIT TSV
-    audit_tsv = stage_dir / "TED.audit.tsv"
-    pd.DataFrame(audit_rows, columns=[
-        "context", "tag", "label", "path", "exists", "size_bytes", "lines_est", "derived_count", "note"
-    ]).to_csv(audit_tsv, sep="\t", index=False)
-    logging.info(f"[TED] Wrote audit log at {audit_tsv}")
+    # AUDIT TSV creation removed; missing files are now logged.
 
     # sidecar summary (simple totals—no means)
     assigned_total = int(sum((r.get("assigned_primary_reads") or 0) for r in rows))
@@ -764,7 +697,6 @@ def collect(stage_dir: Path, cfg) -> None:
         "rows": len(rows),
         "assigned_primary_reads_total": assigned_total,
         "tsv": str(out_tsv),
-        "audit": str(audit_tsv),
     }
     write_metrics(stage_dir, "TED", metrics)
     logging.info(f"[TED] Sidecar metrics written: {metrics}")
