@@ -25,11 +25,25 @@ def _which(exe: str) -> bool:
 
 
 def _resolve(p: Optional[str], data_dir: Path) -> Optional[Path]:
+    """Resolve ``p`` against ``data_dir`` with extra debug logging.
+
+    This helper expands user/environment variables and, when ``p`` is a
+    relative path, joins it to ``data_dir``.  Logging the before/after values
+    makes it easier to diagnose misconfigured paths that lead to missing peak
+    files and unset precision/recall metrics.
+    """
+
     if not p:
+        logging.debug("[TED] _resolve called with empty path; returning None")
         return None
+
     expanded = os.path.expanduser(os.path.expandvars(p))
     pp = Path(expanded)
-    return (data_dir / pp).resolve() if not pp.is_absolute() else pp
+    resolved = (data_dir / pp).resolve() if not pp.is_absolute() else pp
+    logging.debug(
+        f"[TED] Resolving path '{p}' against data_dir '{data_dir}' -> '{resolved}'"
+    )
+    return resolved
 
 
 def _cfg_get(cfg_obj, path: List[str], default=None):
@@ -370,10 +384,18 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
         "ref3prime_precision": None, "ref3prime_recall": None, "ref3prime_f1": None,
     }
     if not have_any:
+        logging.warning("[TED] No peak files found; precision/recall metrics will be None")
         for key_cfg, label in [
             ("prime5", "5"), ("prime3", "3"), ("ref_prime5", "ref5"), ("ref_prime3", "ref3"),
         ]:
-            _audit(audit_rows, tag_ctx, label, f"{key_cfg}_peaks", peaks.get(key_cfg), note="missing")
+            _audit(
+                audit_rows,
+                tag_ctx,
+                label,
+                f"{key_cfg}_peaks",
+                peaks.get(key_cfg),
+                note="missing",
+            )
         return metrics
 
     if not _which("bedtools"):
@@ -396,6 +418,9 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
             pth = peaks.get(key_cfg)
             if pth is None or not pth.exists() or pth.stat().st_size == 0:
                 note = "missing" if (pth is None or not pth.exists()) else "empty"
+                logging.warning(
+                    f"[TED] Peaks file for key '{key_cfg}' {note}: {pth}"
+                )
                 _audit(audit_rows, tag_ctx, label, f"{key_cfg}_peaks", pth, note=note)
                 return None, None, None
 
