@@ -385,6 +385,7 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
 
 # ────────────────────────── main collector ──────────────────────────
 @register("TED")
+@register("ted")
 @register("collapse")
 @register("transcriptome")
 def collect(stage_dir: Path, cfg) -> None:
@@ -422,7 +423,15 @@ def collect(stage_dir: Path, cfg) -> None:
     if data_dir_cfg.is_absolute():
         data_dir = data_dir_cfg
     else:
-        repo_root = stage_dir.parent.parent.parent
+        # ``stage_dir`` resides at ``<repo>/outputs/<run>/<stage>/<hash>``
+        # so the repository root is two levels above ``run_root``.  The
+        # previous implementation only went one level up which resolved
+        # the data directory relative to ``outputs`` instead of the repo
+        # root, leaving non-regionalized runs unable to locate the
+        # TSS/TTS BED files specified in the config.  Adjust the path so
+        # relative ``data_dir`` entries are interpreted from the project
+        # root.
+        repo_root = run_root.parent.parent
         data_dir = (repo_root / data_dir_cfg).resolve()
     logging.debug(f"[TED] Data directory set to: {data_dir}")
 
