@@ -7,15 +7,22 @@ import subprocess
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
+from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, List, Iterable, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
-from ..lib.paths      import PathBuilder
-from ..lib.signature  import compute_signature, write_marker, qc_sidecar_path, load_marker
+from ..lib.paths import PathBuilder
+from ..lib.signature import compute_signature, write_marker, qc_sidecar_path, load_marker
 from ..lib.input_hash import hash_many
-from ..lib.reinstate  import Reinstate
+from ..lib.reinstate import Reinstate
 from ..qc import QC_REGISTRY
 from .stage_utils import get_stage_config, parse_cli_flags
+
+
+class StageAction(Enum):
+    RUN = auto()
+    SKIP = auto()
+    QC_ONLY = auto()
 
 
 class StageBase(ABC):
@@ -30,6 +37,7 @@ class StageBase(ABC):
       • self._hash_inputs: list[Path|str] used for signature
       • self._flags_components: list[str] used for signature
     """
+
     name: str
     requires: tuple[str, ...] = ()
     primary_output_key: str = "bam"
@@ -71,6 +79,7 @@ class StageBase(ABC):
     def resolve_stage_inputs(self, inputs: dict[str, str | Path]) -> dict[str, Path]:
         """Resolve stage inputs relative to cfg.run.data_dir and warn if missing."""
         from .stage_utils import resolve_path
+
         data_dir = Path(self.cfg.run.data_dir)
         resolved: dict[str, Path] = {}
         for key, raw in inputs.items():
@@ -93,13 +102,39 @@ class StageBase(ABC):
     # ─────────────────────────────── Main runner ────────────────────────────────
 
     def run(self) -> PathBuilder:
-        # 1) Build commands (prefer build_cmds, fallback to build_cmd)
+        """Main stage execution: build commands, run, QC, and write marker."""
+
+        # 1) Build and normalize commands
         cmds = self._build_and_normalize_cmds()
 
-        # 2) Compute signature inputs/flags (subclass should set _hash_inputs/_flags_components)
+        # 2) Prepare signature and stage directory
         self._prepare_signature()
+        pb, outputs, primary, needs_qc = self._prepare_stage_dir()
 
-        # 3) Prepare stage directory + output map
+        # 3) Handle no-work case
+        if not cmds:
+            return self._complete_empty_stage(pb)
+
+        # 4) Decide action (run / skip / qc)
+        action = self._decide_action(pb.stage_dir, primary, needs_qc)
+
+        if action is StageAction.SKIP:
+            return self._handle_skip(pb)
+        if action is StageAction.QC_ONLY:
+            return self._handle_qc_only(pb, primary)
+
+        # 5) Execute commands
+        runtime_sec, exit_code, started_ts = self._execute_commands(cmds, pb.stage_dir)
+
+        # 6) Validate outputs
+        self._validate_primary_output(primary)
+
+        # 7) Run QC and finalize
+        return self._finalize_stage(pb, cmds, runtime_sec, exit_code, started_ts, primary)
+
+    # ────────── Helpers for run() orchestration ──────────
+
+    def _prepare_stage_dir(self) -> Tuple[PathBuilder, Dict[str, Path], Path, bool]:
         pb = PathBuilder(self.work_dir, self.run_id, self.name, self.signature)
         stage_dir = pb.stage_dir
         stage_dir.mkdir(parents=True, exist_ok=True)
@@ -107,58 +142,71 @@ class StageBase(ABC):
         outputs = {k: stage_dir / p for k, p in self.expected_outputs().items()}
         primary = outputs[self.primary_output_key]
         needs_qc = self.name in QC_REGISTRY
+        return pb, outputs, primary, needs_qc
 
-        # 4) No work case: write minimal side-effects and return
-        if not cmds:
-            return self._complete_empty_stage(pb)
-
-        # 5) Decide action
-        action = Reinstate.decide(stage_dir, primary, needs_qc=needs_qc, stage_name=self.name)
-        if action == "run" and primary.exists():
-            logging.warning(f"Primary output exists before run for {self.name}; will overwrite")
-        if action == "qc":
+    def _decide_action(self, stage_dir: Path, primary: Path, needs_qc: bool) -> StageAction:
+        decision = Reinstate.decide(stage_dir, primary, needs_qc=needs_qc, stage_name=self.name)
+        if decision == "run":
+            if primary.exists():
+                logging.warning(f"Primary output exists before run for {self.name}; will overwrite")
+            return StageAction.RUN
+        if decision == "skip":
+            return StageAction.SKIP
+        if decision == "qc":
             logging.warning(f"Primary exists but QC incomplete for {self.name}; regenerating QC")
+            return StageAction.QC_ONLY
+        raise ValueError(f"Unknown Reinstate decision: {decision}")
 
-        # 6) Handle skip / qc-only
-        if action == "skip":
-            logging.info(f"[SKIP] {self.name} complete (sig={self.signature})")
-            try:
-                full_meta = load_marker(stage_dir)
-                pb.metadata = full_meta if isinstance(full_meta, dict) else {}
-            except FileNotFoundError:
-                pb.metadata = {}
-            return pb
+    def _handle_skip(self, pb: PathBuilder) -> PathBuilder:
+        logging.info(f"[SKIP] {self.name} complete (sig={self.signature})")
+        try:
+            full_meta = load_marker(pb.stage_dir)
+            pb.metadata = full_meta if isinstance(full_meta, dict) else {}
+        except FileNotFoundError:
+            pb.metadata = {}
+        return pb
 
-        if action == "qc":
-            logging.info(f"[QC] Regenerating QC for {self.name} (sig={self.signature})")
-            qc_metrics = self._run_qc(stage_dir, primary, runtime=None)
-            pb.metadata = qc_metrics
-            old_meta = load_marker(stage_dir / ".completed.json")
-            if not isinstance(old_meta, dict):
-                old_meta = {}
-            old_meta["qc"] = qc_metrics
-            write_marker(pb, old_meta)
-            return pb
+    def _handle_qc_only(self, pb: PathBuilder, primary: Path) -> PathBuilder:
+        logging.info(f"[QC] Regenerating QC for {self.name} (sig={self.signature})")
+        qc_metrics = self._run_qc(pb.stage_dir, primary, runtime=None)
+        pb.metadata = qc_metrics
+        old_meta = load_marker(pb.stage_dir / ".completed.json")
+        if not isinstance(old_meta, dict):
+            old_meta = {}
+        old_meta["qc"] = qc_metrics
+        write_marker(pb, old_meta)
+        return pb
 
-        # 7) Execute tools
+    def _execute_commands(
+        self, cmds: List[List[str]], stage_dir: Path
+    ) -> Tuple[float, int, float]:
         start_ts = time.time()
         exit_code = self._run_all(cmds, log_path=stage_dir / "tool.log", cwd=stage_dir)
         runtime_sec = round(time.time() - start_ts, 2)
+        return runtime_sec, exit_code, start_ts
 
-        # 8) Validate primary
+    def _validate_primary_output(self, primary: Path) -> None:
         if not primary.exists():
             logging.warning(f"Stage {self.name} completed but primary output missing: {primary}")
             raise RuntimeError(f"Stage {self.name} failed: missing primary output {primary}")
 
-        # 9) QC and marker
-        qc_metrics = self._run_qc(stage_dir, primary, runtime_sec)
+    def _finalize_stage(
+        self,
+        pb: PathBuilder,
+        cmds: List[List[str]],
+        runtime_sec: float,
+        exit_code: int,
+        started_ts: float,
+        primary: Path,
+    ) -> PathBuilder:
+        qc_metrics = self._run_qc(pb.stage_dir, primary, runtime_sec)
         pb.metadata = qc_metrics
 
         meta = self._make_marker(
             cmds=[" ".join(c) for c in cmds],
             exit_code=exit_code,
             runtime_sec=runtime_sec,
-            started_ts=start_ts,
+            started_ts=started_ts,
             qc_metrics=qc_metrics,
         )
         write_marker(pb, meta)
@@ -188,6 +236,7 @@ class StageBase(ABC):
 
         if self.name in QC_REGISTRY:
             from ..qc import write_metrics
+
             write_metrics(stage_dir, self.name, qc_summary)
 
         now = self._now_utc_iso()
@@ -198,7 +247,7 @@ class StageBase(ABC):
             "exit_code": 0,
             "runtime_sec": 0.0,
             "started": now,
-            "ended":   now,
+            "ended": now,
             "host": platform.node(),
             "qc": qc_summary,
         }
@@ -212,22 +261,17 @@ class StageBase(ABC):
         for cmd in cmds:
             exit_code = self.run_tool(cmd, log_path=log_path, cwd=cwd)
             if exit_code != 0:
-                # run_tool already logs and raises, but keep logic parallel to original
-                logging.warning(f"External tool for stage {self.name} exited with code {exit_code}")
+                logging.warning(
+                    f"External tool for stage {self.name} exited with code {exit_code}"
+                )
                 break
         return exit_code
 
     def _run_qc(self, stage_dir: Path, primary: Path, runtime: float | None) -> Dict:
-        """
-        Generic QC runner. Stages may override this (e.g., CorrectStage).
-        """
+        """Generic QC runner. Stages may override this (e.g., CorrectStage)."""
         logging.info(f"Executing _run_qc for stage: {self.name}")
         qc_func = QC_REGISTRY.get(self.name)
-        if not qc_func:
-            logging.warning(f"No QC function registered for stage: {self.name}")
-            return {}
-        if not primary.exists():
-            logging.warning(f"Primary output does not exist for stage: {self.name}")
+        if not qc_func or not primary.exists():
             return {}
 
         try:
@@ -238,15 +282,20 @@ class StageBase(ABC):
                 "n_input_reads": getattr(self, "_n_input_reads", None),
                 "runtime_sec": runtime,
             }
-            # Align has an extra genome_fa parameter
             if self.name == "align":
-                return qc_func(primary, out_dir=stage_dir,
-                               n_input_reads=kwargs["n_input_reads"],
-                               genome_fa=genome_fa,
-                               runtime_sec=runtime)
-            return qc_func(primary, out_dir=stage_dir,
-                           n_input_reads=kwargs["n_input_reads"],
-                           runtime_sec=runtime)
+                return qc_func(
+                    primary,
+                    out_dir=stage_dir,
+                    n_input_reads=kwargs["n_input_reads"],
+                    genome_fa=genome_fa,
+                    runtime_sec=runtime,
+                )
+            return qc_func(
+                primary,
+                out_dir=stage_dir,
+                n_input_reads=kwargs["n_input_reads"],
+                runtime_sec=runtime,
+            )
         except Exception as e:
             logging.info(f"QC for '{self.name}' failed: {e}")
             return {}
@@ -261,15 +310,15 @@ class StageBase(ABC):
     ) -> Dict:
         """Create the marker dict consistently in one place."""
         meta = {
-            "stage":       self.name,
-            "signature":   self.signature,
-            "cmds":        cmds,
-            "exit_code":   exit_code,
+            "stage": self.name,
+            "signature": self.signature,
+            "cmds": cmds,
+            "exit_code": exit_code,
             "runtime_sec": runtime_sec,
-            "started":     datetime.fromtimestamp(started_ts, timezone.utc).isoformat(),
-            "ended":       self._now_utc_iso(),
-            "host":        platform.node(),
-            "qc":          qc_metrics,
+            "started": datetime.fromtimestamp(started_ts, timezone.utc).isoformat(),
+            "ended": self._now_utc_iso(),
+            "host": platform.node(),
+            "qc": qc_metrics,
         }
         if hasattr(self, "_n_input_reads"):
             meta["n_input_reads"] = self._n_input_reads
@@ -284,7 +333,9 @@ class StageBase(ABC):
     @property
     def signature(self) -> str:
         if self._sig is None:
-            self._sig = compute_signature(self.tool_version, self.flags_str, self.input_hashes)
+            self._sig = compute_signature(
+                self.tool_version, self.flags_str, self.input_hashes
+            )
         return self._sig
 
     @property
@@ -305,7 +356,7 @@ class StageBase(ABC):
         """
         Run a single external command inside the configured conda env
         (unless the command already starts with 'conda').
-        Mirrors original behavior: logs to file, raises on non-zero exit.
+        Logs to file, raises on non-zero exit.
         """
         env = self.cfg.run.conda_env
         full_cmd = ["conda", "run", "-n", env] + cmd if cmd and cmd[0] != "conda" else cmd
@@ -321,3 +372,4 @@ class StageBase(ABC):
             )
             raise RuntimeError(f"{self.name} failed with exit code {proc.returncode}")
         return proc.returncode
+
