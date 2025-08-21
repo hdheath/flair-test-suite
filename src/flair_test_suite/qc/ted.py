@@ -13,7 +13,10 @@ import pandas as pd
 
 from . import register, write_metrics  # QC plumbing
 from .qc_utils import count_lines
-from ..plotting import transcriptome_browser
+try:  # pragma: no cover - optional dependency
+    from ..plotting import transcriptome_browser
+except Exception:  # pragma: no cover - handle missing heavy deps
+    transcriptome_browser = None
 from ..lib import PathBuilder
 
 
@@ -50,22 +53,17 @@ def _resolve(p: Optional[str], data_dir: Path) -> Optional[Path]:
 
 
 def _cfg_get(cfg_obj, path: List[str], default=None):
-    """Safely walk a mixed object/``dict`` config structure.
+    """Safely walk a mixed object/``dict`` config structure."""
 
-    ``cfg`` may be a ``dynaconf`` object (attribute access) or a simple
-    ``dict``.  This helper mirrors the inlined logic that previously lived in
-    :func:`collect` and allows reuse in small helpers below.
-    """
     cur = cfg_obj
-    try:
-        for k in path:
-            cur = getattr(cur, k)
-        return cur
-    except Exception:
-        cur = cfg_obj
-        for k in path:
-            cur = cur.get(k, {}) if isinstance(cur, dict) else {}
-        return cur if cur != {} else default
+    for k in path:
+        if isinstance(cur, dict):
+            cur = cur.get(k)
+        else:
+            cur = getattr(cur, k, None)
+        if cur is None:
+            return default
+    return cur
 
 
 def _run(cmd: List[str]) -> subprocess.CompletedProcess:
@@ -234,7 +232,18 @@ def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, Optional[str]], in
     }
 
     if not all(peaks_cfg.values()):
-        stage_flags = _cfg_get(cfg, ["run", "stages", stage_name, "flags"], {}) or {}
+        stage_flags: Dict[str, Optional[str]] = {}
+        stages = _cfg_get(cfg, ["run", "stages"], []) or []
+        if isinstance(stages, list):
+            for st in stages:
+                name = getattr(st, "name", None) if not isinstance(st, dict) else st.get("name")
+                if name == stage_name:
+                    sf = getattr(st, "flags", {}) if not isinstance(st, dict) else st.get("flags", {})
+                    stage_flags = dict(sf or {})
+                    break
+        elif isinstance(stages, dict):
+            stage_flags = dict(stages.get(stage_name, {}).get("flags", {}))
+
         mapping = {
             "prime5": "experiment_5_prime_regions_bed_file",
             "prime3": "experiment_3_prime_regions_bed_file",
@@ -693,7 +702,11 @@ def collect(
             # ── Optional transcriptome browser plot ──
             try:
                 gtf_path = stage_dir / f"{tag}.isoforms.gtf"
-                if reg_bam and gtf_path.exists():
+                if (
+                    transcriptome_browser
+                    and reg_bam
+                    and gtf_path.exists()
+                ):
                     outdir = stage_dir / "transcriptome_browser"
                     cfg_tb = transcriptome_browser.Config(
                         bam=reg_bam,
@@ -708,7 +721,7 @@ def collect(
                     )
                 else:
                     logging.warning(
-                        f"[TED] Skipping transcriptome browser for {tag}: missing BAM or GTF"
+                        f"[TED] Skipping transcriptome browser for {tag}: missing BAM, GTF, or dependency"
                     )
             except Exception as e:
                 logging.warning(
