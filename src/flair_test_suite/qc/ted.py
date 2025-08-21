@@ -15,8 +15,9 @@ from . import register, write_metrics  # QC plumbing
 from .qc_utils import count_lines
 from ..plotting import transcriptome_browser
 
-# If your CLI sets logging, you can remove/relax this.
-logging.basicConfig(level=logging.DEBUG)
+
+# Use module logger
+logger = logging.getLogger(__name__)
 
 # ────────────────────────── tiny utils ──────────────────────────
 def _which(exe: str) -> bool:
@@ -33,14 +34,15 @@ def _resolve(p: Optional[str], data_dir: Path) -> Optional[Path]:
     files and unset precision/recall metrics.
     """
 
+
     if not p:
-        logging.debug("[TED] _resolve called with empty path; returning None")
+        logger.debug("[TED] _resolve called with empty path; returning None")
         return None
 
     expanded = os.path.expanduser(os.path.expandvars(p))
     pp = Path(expanded)
     resolved = (data_dir / pp).resolve() if not pp.is_absolute() else pp
-    logging.debug(
+    logger.debug(
         f"[TED] Resolving path '{p}' against data_dir '{data_dir}' -> '{resolved}'"
     )
     return resolved
@@ -66,11 +68,11 @@ def _cfg_get(cfg_obj, path: List[str], default=None):
 
 
 def _run(cmd: List[str]) -> subprocess.CompletedProcess:
-    logging.debug(f"[TED] RUN: {' '.join(cmd)}")
+    logger.debug(f"[TED] RUN: {' '.join(cmd)}")
     try:
         return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
     except subprocess.CalledProcessError as e:
-        logging.error(f"[TED] Command failed ({' '.join(cmd)}): {e.stderr.strip()}")
+        logger.error(f"[TED] Command failed ({' '.join(cmd)}): {e.stderr.strip()}")
         raise
 
 
@@ -87,7 +89,7 @@ def _read_bed6(path: Path) -> pd.DataFrame:
         )
     except Exception:
         # Fallback: BED3
-        logging.warning(f"[TED] {path} does not look like BED6; treating as BED3 (strand='.') which may zero-out recall.")
+        logger.warning(f"[TED] {path} does not look like BED6; treating as BED3 (strand='.') which may zero-out recall.")
         df = pd.read_csv(
             path, sep="\t", header=None, usecols=[0, 1, 2],
             names=["Chrom", "Start", "End"],
@@ -115,7 +117,7 @@ def _prepare_bed6_sorted(path: Path, tmps: List[Path]) -> Path:
     except Exception:
         pass
     tmps.append(sorted_p)
-    logging.debug(f"[TED] Prepared sorted BED6: {sorted_p}")
+    logger.debug(f"[TED] Prepared sorted BED6: {sorted_p}")
     return sorted_p
 
 
@@ -294,7 +296,7 @@ def _dirs_with_file(root: Path, stage: str, fname: str) -> List[Path]:
         return []
     dirs = [p for p in base.iterdir() if p.is_dir() and (p / fname).exists()]
     dirs.sort(key=lambda p: (p / fname).stat().st_mtime, reverse=True)
-    logging.debug(f"[TED] Searching {base} for {fname} -> {[str(d) for d in dirs]}")
+    logger.debug(f"[TED] Searching {base} for {fname} -> {[str(d) for d in dirs]}")
     return dirs
 
 
@@ -316,7 +318,7 @@ def _build_region_metrics_index(run_root: Path) -> Dict[str, Dict]:
         try:
             df = pd.read_csv(metrics, sep="\t")
         except Exception as e:
-            logging.warning(f"[TED] Failed reading {metrics}: {e}")
+            logger.warning(f"[TED] Failed reading {metrics}: {e}")
             continue
         if "region_tag" not in df.columns:
             continue
@@ -328,7 +330,7 @@ def _build_region_metrics_index(run_root: Path) -> Dict[str, Dict]:
                 "reg_dir": d,
             }
             idx[tag] = rec
-    logging.debug(f"[TED] Region index entries: {len(idx)}")
+    logger.debug(f"[TED] Region index entries: {len(idx)}")
     return idx
 
 
@@ -401,6 +403,7 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
     if not _which("bedtools"):
         raise RuntimeError("TED requires 'bedtools' on PATH when TSS/TTS files are provided.")
 
+
     full_bed_df = pd.read_csv(
         iso_bed, sep="\t", header=None, comment="#",
         usecols=[0, 1, 2, 3, 5],
@@ -408,17 +411,21 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
         dtype={"Chrom": str, "Start": np.int32, "End": np.int32, "Name": str, "Strand": str},
     )
     n_tx = len(full_bed_df)
+    if n_tx == 0:
+        logger.warning(f"[TED] Isoforms BED '{iso_bed}' has 0 transcripts; "
+                       f"precision undefined for {tag_ctx}.")
     bed_df = full_bed_df[["Chrom", "Start", "End", "Strand"]]
 
     tmp_local: List[Path] = []
     try:
         bed_sorted = _prepare_bed6_sorted(iso_bed, tmp_local)
 
+
         def _side(key_cfg: str, label: str) -> Tuple[Optional[float], Optional[float], Optional[float]]:
             pth = peaks.get(key_cfg)
             if pth is None or not pth.exists() or pth.stat().st_size == 0:
                 note = "missing" if (pth is None or not pth.exists()) else "empty"
-                logging.warning(
+                logger.warning(
                     f"[TED] Peaks file for key '{key_cfg}' {note}: {pth}"
                 )
                 _audit(audit_rows, tag_ctx, label, f"{key_cfg}_peaks", pth, note=note)
@@ -432,9 +439,15 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
             precision = (m / n_tx) if n_tx else None
 
             peaks_df = _read_bed6(pth)
+            if peaks_df.empty:
+                logger.warning(f"[TED] Peaks file '{pth}' parsed to 0 intervals; "
+                               f"recall undefined for {tag_ctx}/{key_cfg}.")
             c, t = _vectorized_overlap_counts(bed_df, peaks_df, window)
             recall = (c / t) if t else None
             f1 = _safe_f1(precision, recall)
+
+            logger.debug(f"[TED] {tag_ctx}/{key_cfg}: peaks rows={len(peaks_df)}, "
+                         f"isoforms={n_tx}, window={window}")
 
             _audit(
                 audit_rows,
@@ -504,14 +517,9 @@ def collect(stage_dir: Path, cfg) -> None:
         data_dir = (repo_root / data_dir_cfg).resolve()
     logging.debug(f"[TED] Data directory set to: {data_dir}")
 
+
+
     peaks_cfg, window = _build_peaks_cfg(cfg, stage_name)
-    logging.debug(f"[TED] Window: {window}")
-    logging.debug(f"[TED] Peaks configuration (final): {peaks_cfg}")
-
-    # Build region metrics index across ALL regionalize runs
-    reg_index = _build_region_metrics_index(run_root)
-
-    rows: List[Dict] = []
 
     # Determine if this is regionalized by matching chr_start_end pattern
     iso_beds = sorted(stage_dir.glob("*.isoforms.bed"))
@@ -521,8 +529,31 @@ def collect(stage_dir: Path, cfg) -> None:
     logging.debug(f"[TED] Regional isoform beds: {[p.name for p in regional_files]}")
     logging.debug(f"[TED] is_regionalized: {is_regionalized}")
 
+    # If no peak config for this stage and we're regionalized, fallback to regionalize stage config
+    if is_regionalized and not any(peaks_cfg.values()):
+        logger.info(f"[TED] No peak config for stage '{stage_name}', falling back to 'regionalize' config for regionalized run.")
+        peaks_cfg, window = _build_peaks_cfg(cfg, "regionalize")
+    logging.debug(f"[TED] Window: {window}")
+    logging.debug(f"[TED] Peaks configuration (final): {peaks_cfg}")
+
+    # Build region metrics index across ALL regionalize runs
+    reg_index = _build_region_metrics_index(run_root)
+
+    rows: List[Dict] = []
+    audit_rows: List[Dict] = []
+
     if is_regionalized:
         # ── Regionalized: iterate over discovered isoform files
+        # Get the correct regionalize output directory from upstreams if available
+        regionalize_pb = getattr(cfg, 'upstreams', {}).get('regionalize', None)
+        reg_dir_base = None
+        if regionalize_pb is not None and hasattr(regionalize_pb, 'stage_dir'):
+            reg_dir_base = regionalize_pb.stage_dir
+        else:
+            # Fallback: try to infer from outputs/<run_id>/regionalize/<hash>
+            # Use the hash from the collapse/correct stage_dir if possible
+            hash_dir = stage_dir.parent.name
+            reg_dir_base = stage_dir.parent.parent / 'regionalize' / hash_dir
         for iso_bed in regional_files:
             tag = iso_bed.stem.replace(".isoforms", "")
             logging.debug(f"[TED] Processing region tag: {tag}")
@@ -541,37 +572,59 @@ def collect(stage_dir: Path, cfg) -> None:
                 logging.warning(f"[TED] Isoform read map for region {tag} not found: {map_txt}")
 
             n_iso, n_genes_obs = _isoform_counts(iso_bed)
+            if n_iso == 0:
+                logger.warning(f"[TED] {iso_bed.name} contains 0 isoforms; "
+                               "precision will be None for this row.")
             assigned_reads = _read_map_unique_reads(map_txt)
             logging.debug(f"[TED] Region {tag} - n_iso: {n_iso}, n_genes_obs: {n_genes_obs}, assigned_reads: {assigned_reads}")
 
-            # expected region metrics via index
-            reg_rec = reg_index.get(tag, {})
-            reg_gene_cnt = int(reg_rec.get("gene_count", 0) or 0)
-            reg_tx_cnt   = int(reg_rec.get("transcript_count", 0) or 0)
-            reg_dir_for_tag: Optional[Path] = reg_rec.get("reg_dir")
-            logging.debug(f"[TED] For region {tag}, expected genes: {reg_gene_cnt}, transcripts: {reg_tx_cnt}")
+            # Use the correct regionalize hash directory for peak files
+            reg_dir_for_tag = reg_dir_base
+            reg_gene_cnt = None
+            reg_tx_cnt = None
             reg_bam = (reg_dir_for_tag / f"{tag}.bam") if reg_dir_for_tag else None
 
             # peaks: prefer sliced if available
             peaks = {}
-            for key, conf in peaks_cfg.items():
+            # If config is missing, use default suffixes and look for files in reg_dir_for_tag
+            default_suffixes = {
+                "prime5": "CAGE_TSS_human.bed",
+                "prime3": "WTC11_all_polyApeaks_fixed.bed",
+                "ref_prime5": "human_ref_TSS.bed",
+                "ref_prime3": "human_ref_TTS.bed"
+            }
+            for key in ["prime5", "prime3", "ref_prime5", "ref_prime3"]:
+                conf = peaks_cfg.get(key)
                 if not conf:
-                    peaks[key] = None
-                    logging.debug(f"[TED] No configuration for peaks key '{key}'")
+                    # Try default suffix
+                    base = default_suffixes[key]
+                    sliced = (reg_dir_for_tag / f"{tag}_{base}") if reg_dir_for_tag else None
+                    print(f"[TED] (fallback) Looking for sliced peak file for key '{key}': {sliced}")
+                    if sliced and sliced.exists() and sliced.stat().st_size > 0:
+                        print(f"[TED] (fallback) Found sliced peak file for key '{key}': {sliced}")
+                        peaks[key] = sliced
+                    else:
+                        print(f"[TED] (fallback) No config and no sliced peak file for key '{key}' in {reg_dir_for_tag}")
+                        peaks[key] = None
                     continue
                 base = Path(conf).name
                 sliced = (reg_dir_for_tag / f"{tag}_{base}") if reg_dir_for_tag else None
+                print(f"[TED] Looking for sliced peak file for key '{key}': {sliced}")
                 if sliced and sliced.exists() and sliced.stat().st_size > 0:
+                    print(f"[TED] Found sliced peak file for key '{key}': {sliced}")
                     peaks[key] = sliced
                 else:
                     rp = _resolve(conf, data_dir)
+                    print(f"[TED] Looking for global peak file for key '{key}': {rp}")
                     if not (rp and rp.exists() and rp.stat().st_size > 0):
-                        logging.warning(f"[TED] Peaks file for key '{key}' and region {tag} not found: {conf}")
+                        print(f"[TED] Peaks file for key '{key}' and region {tag} not found: {conf}")
+                    else:
+                        print(f"[TED] Found global peak file for key '{key}': {rp}")
                     peaks[key] = rp if (rp and rp.exists() and rp.stat().st_size > 0) else None
 
             logging.debug(f"[TED] For region {tag}, resolved peaks: { {k: str(v) if v else None for k,v in peaks.items()} }")
 
-            tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, [], f"region:{tag}")
+            tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, f"region:{tag}")
             logging.debug(f"[TED] Region {tag} TSS/TTS metrics: {tss_tts}")
 
             # Denominator per rule
@@ -644,6 +697,9 @@ def collect(stage_dir: Path, cfg) -> None:
             logging.warning(f"[TED] Isoform read map not found: {map_txt}")
 
         n_iso, n_genes_obs = _isoform_counts(iso_bed)
+        if n_iso == 0:
+            logger.warning(f"[TED] {iso_bed.name} contains 0 isoforms; "
+                           "precision will be None for this row.")
         assigned_reads = _read_map_unique_reads(map_txt)
         logging.debug(f"[TED] Single mode - n_iso: {n_iso}, n_genes_obs: {n_genes_obs}, assigned_reads: {assigned_reads}")
 
@@ -658,7 +714,7 @@ def collect(stage_dir: Path, cfg) -> None:
                 logging.warning(f"[TED] Peaks file for key '{key}' not found: {conf}")
             peaks[key] = rp if (rp and rp.exists() and rp.stat().st_size > 0) else None
         logging.debug(f"[TED] Single mode peaks resolved: { {k: str(v) if v else None for k, v in peaks.items()} }")
-        tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, [], "single")
+        tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, "single")
 
         if stage_name == "collapse":
             corr_bed = _find_correct_bed_single(run_root, run_id)
@@ -713,7 +769,13 @@ def collect(stage_dir: Path, cfg) -> None:
         df.to_csv(out_tsv, sep="\t", index=False)
     logging.info(f"[TED] Wrote TED.tsv with {len(rows)} rows at {out_tsv}")
 
-    # AUDIT TSV creation removed; missing files are now logged.
+    # Write audit TSV
+    audit_tsv = stage_dir / "TED.audit.tsv"
+    pd.DataFrame(
+        audit_rows,
+        columns=["context","tag","label","path","exists","size_bytes","lines_est","derived_count","note"]
+    ).to_csv(audit_tsv, sep="\t", index=False)
+    logger.info(f"[TED] Wrote audit log at {audit_tsv}")
 
     # sidecar summary (simple totals—no means)
     assigned_total = int(sum((r.get("assigned_primary_reads") or 0) for r in rows))
