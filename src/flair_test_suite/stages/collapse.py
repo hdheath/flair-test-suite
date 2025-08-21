@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .base import StageBase
-from ..qc.qc_utils import count_lines
+from ..qc.qc_utils import bed_is_empty
 from ..qc import write_metrics
 from .stage_utils import read_region_details, make_flair_cmd
 ...
@@ -57,14 +57,9 @@ class CollapseStage(StageBase):
             for chrom, start, end in read_region_details(details):
                 tag = f"{chrom}_{start}_{end}"
                 bed = corr_dir / f"{tag}_all_corrected.bed"
-                if not bed.exists():
+                if bed_is_empty(bed):
                     logging.warning(
-                        f"[collapse] Missing corrected BED for region, skipping: {bed}"
-                    )
-                    continue
-                if bed.stat().st_size == 0 or count_lines(bed) == 0:
-                    logging.warning(
-                        f"[collapse] Empty corrected BED, skipping: {bed}"
+                        f"[collapse] Missing or empty corrected BED, skipping: {bed}"
                     )
                     continue
                 pairs.append((bed, tag))
@@ -73,7 +68,7 @@ class CollapseStage(StageBase):
             bed = corr_dir / f"{self.run_id}_all_corrected.bed"
             if not bed.exists():
                 raise RuntimeError(f"Expected corrected BED not found: {bed}")
-            if bed.stat().st_size == 0 or count_lines(bed) == 0:
+            if bed_is_empty(bed):
                 raise RuntimeError(f"Corrected BED is empty: {bed}")
             pairs.append((bed, self.run_id))
 

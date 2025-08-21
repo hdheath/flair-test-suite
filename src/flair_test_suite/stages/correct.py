@@ -8,7 +8,7 @@ from .base import StageBase
 from .stage_utils import read_region_details, make_flair_cmd
 from ..qc.correct_qc import run_qc
 from ..qc import write_metrics
-from ..qc.qc_utils import count_lines
+from ..qc.qc_utils import bed_is_empty
 
 
 class CorrectStage(StageBase):
@@ -86,12 +86,8 @@ class CorrectStage(StageBase):
 
         cmds: List[List[str]] = []
         for bed_file, region_tag in self._bed_files:
-            if (
-                (not bed_file.exists())
-                or (bed_file.stat().st_size == 0)
-                or (count_lines(bed_file) == 0)
-            ):
-                logging.warning(f"[correct] Skipping empty BED: {bed_file}")
+            if bed_is_empty(bed_file):
+                logging.warning(f"[correct] Skipping missing/empty BED: {bed_file}")
                 continue
 
             out_prefix = region_tag

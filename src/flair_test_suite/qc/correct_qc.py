@@ -9,10 +9,12 @@ from .qc_utils import (
     percent,
     count_unique_junctions,
     count_splice_junction_motifs,
+    bed_is_empty,
 )
 from ..lib.signature import qc_sidecar_path
 
 __all__ = ["collect", "run_qc"]
+
 
 def _find_align_stage_dir(out_dir: Path, align_sig: str) -> Path:
     cur = out_dir
@@ -22,15 +24,6 @@ def _find_align_stage_dir(out_dir: Path, align_sig: str) -> Path:
             return cand
         cur = cur.parent
     raise FileNotFoundError(f"Could not locate align stage dir from {out_dir} (sig={align_sig})")
-
-def _bed_is_empty(p: Path) -> bool:
-    try:
-        if (not p.exists()) or (p.stat().st_size == 0):
-            return True
-        return count_lines(p) == 0
-    except Exception as e:
-        logging.warning(f"[correct-qc] Failed to probe BED {p} ({e}); treating as empty.")
-        return True
 
 @register("correct")
 def collect(
@@ -50,7 +43,7 @@ def collect(
     t0 = time.time()
 
     # Always skip empties early
-    if _bed_is_empty(bed):
+    if bed_is_empty(bed):
         metrics = {"skipped_empty_bed": True, "n_corrected_reads": 0, "qc_runtime_sec": 0.0}
         write_metrics(out_dir, "correct", metrics)
         return metrics
@@ -182,7 +175,7 @@ def run_qc(
         region_qc_dir.mkdir(parents=True, exist_ok=True)
 
         # Skip if corrected bed missing/empty (still emit a minimal TSV)
-        if _bed_is_empty(corrected_bed):
+        if bed_is_empty(corrected_bed):
             metrics = {"skipped_empty_bed": True, "n_corrected_reads": 0, "qc_runtime_sec": 0.0}
             write_metrics(region_qc_dir, "correct", metrics)
             qc_metrics[region_tag] = metrics
