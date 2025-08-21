@@ -44,12 +44,18 @@ class Reinstate:
 
         if needs_qc and stage_name in {"collapse", "transcriptome"}:
             ted_tsv = stage_dir / "TED.tsv"
-            browser_dir = stage_dir / "transcriptome_browser"
-            browser_png = None
-            if browser_dir.exists():
-                browser_png = next(browser_dir.glob("*.png"), None)
-            qc_ok = ted_tsv.exists() and browser_png is not None
-            qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}, browser plot {'found' if browser_png else 'missing'}"
+            # Check for regionalized run by presence of region-tagged isoform beds
+            is_regionalized = any(stage_dir.glob("*_*_*.isoforms.bed"))
+            if is_regionalized:
+                browser_dir = stage_dir / "transcriptome_browser"
+                browser_png = None
+                if browser_dir.exists():
+                    browser_png = next(browser_dir.glob("*.png"), None)
+                qc_ok = ted_tsv.exists() and browser_png is not None
+                qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}, browser plot {'found' if browser_png else 'missing'}"
+            else:
+                qc_ok = ted_tsv.exists()
+                qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'} (non-regionalized, browser plot not required)"
         elif needs_qc:
             qc_tsv = qc_sidecar_path(stage_dir, stage_name)
             qc_ok = qc_tsv.exists()
