@@ -40,7 +40,13 @@ class DummyTree:  # pragma: no cover - behaviour irrelevant
 intervaltree.IntervalTree = DummyTree
 sys.modules.setdefault("intervaltree", intervaltree)
 
-from flair_test_suite.plotting.transcriptome_browser import _parse_region
+from pathlib import Path
+
+from flair_test_suite.plotting.transcriptome_browser import (
+    _parse_region,
+    Config,
+    generate,
+)
 
 
 def test_parse_region_basic():
@@ -49,3 +55,25 @@ def test_parse_region_basic():
 
 def test_parse_region_with_dash_in_chrom():
     assert _parse_region("chr1-2_random:100-200") == ("chr1-2_random", 100, 200)
+
+
+def test_parse_region_too_long():
+    assert _parse_region("chr1:100-25000") is None
+
+
+def test_generate_skips_large_region(monkeypatch):
+    cfg = Config(gtf=Path("dummy.gtf"))
+
+    called = False
+
+    def fake_alignment_file(*args, **kwargs):  # pragma: no cover - behaviour irrelevant
+        nonlocal called
+        called = True
+        raise AssertionError("AlignmentFile should not be called for large region")
+
+    from flair_test_suite.plotting import transcriptome_browser as tb
+
+    monkeypatch.setattr(tb.pysam, "AlignmentFile", fake_alignment_file, raising=False)
+
+    generate(cfg, region="chr1:0-25000")
+    assert not called
