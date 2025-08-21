@@ -183,6 +183,9 @@ def _parse_region(region: Optional[str]) -> Optional[Tuple[str, int, int]]:
 def generate(cfg: Config, region: Optional[str] = None) -> None:
     """Generate plot from configuration (reads + isoform bars only)."""
     region_tuple = _parse_region(region)
+    # If a region was supplied but parsing failed (e.g. too long), skip plotting
+    if region and not region_tuple:
+        return
     chrom = None
     r0 = r1 = None
     if region_tuple:
