@@ -11,6 +11,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 sys.modules.setdefault("intervaltree", types.SimpleNamespace(IntervalTree=object))
 sys.modules.setdefault("pysam", types.SimpleNamespace(AlignedSegment=object))
 
+from flair_test_suite.config_schema import Config as Cfg
 from flair_test_suite.qc import ted
 
 
@@ -37,8 +38,15 @@ def test_collect_single_resolves_peaks(tmp_path: Path, monkeypatch):
         "chr1\t100\t200\tread_ENSG000001.1\t0\t+\n"
     )
 
-    cfg = {
-        "run": {"data_dir": "test_data"},
+    cfg_dict = {
+        "run_id": run_id,
+        "run": {
+            "version": "1",
+            "conda_env": "env",
+            "work_dir": "outputs",
+            "data_dir": "test_data",
+            "stages": [{"name": "collapse", "requires": []}],
+        },
         "qc": {
             "collapse": {
                 "TED": {
@@ -51,6 +59,7 @@ def test_collect_single_resolves_peaks(tmp_path: Path, monkeypatch):
             }
         },
     }
+    cfg = Cfg.model_validate(cfg_dict)
 
     captured = {}
 
@@ -103,22 +112,29 @@ def test_collect_single_uses_stage_flags(tmp_path: Path, monkeypatch):
     iso_bed = stage_dir / f"{run_id}.isoforms.bed"
     iso_bed.write_text("chr1\t100\t200\tread_ENSG000001.1\t0\t+\n")
 
-    cfg = {
+    cfg_dict = {
+        "run_id": run_id,
         "run": {
+            "version": "1",
+            "conda_env": "env",
+            "work_dir": "outputs",
             "data_dir": "test_data",
-            "stages": {
-                "collapse": {
+            "stages": [
+                {
+                    "name": "collapse",
+                    "requires": [],
                     "flags": {
                         "experiment_5_prime_regions_bed_file": "exp5.bed",
                         "experiment_3_prime_regions_bed_file": "exp3.bed",
                         "reference_5_prime_regions_bed_file": "ref5.bed",
                         "reference_3_prime_regions_bed_file": "ref3.bed",
-                    }
+                    },
                 }
-            },
+            ],
         },
         "qc": {"collapse": {"TED": {"window": 10}}},
     }
+    cfg = Cfg.model_validate(cfg_dict)
 
     captured = {}
 
