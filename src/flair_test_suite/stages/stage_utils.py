@@ -134,6 +134,151 @@ def parse_cli_flags(
 
     return flag_parts, extra_inputs
 
+
+# ── common stage helpers ---------------------------------------
+
+def collect_upstream_pairs(
+    stage_name: str,
+    upstreams: dict,
+    run_id: str,
+    expected_suffix: str,
+    regionalized_suffix: str,
+    file_check: callable[[Path], bool] = lambda p: p.exists() and p.stat().st_size > 0,
+) -> tuple[list[tuple[Path, str]], list[Path], str]:
+    """Collect inputs from upstream(s).
+
+    Returns:
+      pairs         -> [(path, tag)]
+      upstream_sigs -> [signatures]
+      mode          -> "regionalized" | "standard"
+    """
+
+    pairs: list[tuple[Path, str]] = []
+    upstream_sigs: list[Path] = []
+
+    if "regionalize" in upstreams:
+        mode = "regionalized"
+        reg_pb = upstreams["regionalize"]
+        upstream_sigs.append(reg_pb.signature)
+        details = reg_pb.stage_dir / "region_details.tsv"
+        if not details.exists():
+            raise RuntimeError(f"[{stage_name}] region_details.tsv not found: {details}")
+
+        regions = read_region_details(details)
+        for chrom, start, end in regions:
+            tag = f"{chrom}_{start}_{end}"
+            fpath = None
+            for pb in upstreams.values():
+                candidate = pb.stage_dir / regionalized_suffix.format(
+                    chrom=chrom, start=start, end=end
+                )
+                if file_check(candidate):
+                    fpath = candidate
+                    if pb.signature not in upstream_sigs:
+                        upstream_sigs.append(pb.signature)
+                    break
+            if not fpath:
+                logging.warning(
+                    f"[{stage_name}] Skipping missing/empty input: "
+                    f"{regionalized_suffix.format(chrom=chrom, start=start, end=end)}"
+                )
+                continue
+            pairs.append((fpath, tag))
+    else:
+        mode = "standard"
+        fpath = None
+        base_pb = None
+        for pb in upstreams.values():
+            candidate = pb.stage_dir / f"{run_id}_{expected_suffix}"
+            if file_check(candidate):
+                base_pb = pb
+                fpath = candidate
+                break
+        if not base_pb or not fpath:
+            raise RuntimeError(f"[{stage_name}] requires upstream {expected_suffix}")
+        upstream_sigs.append(base_pb.signature)
+        pairs.append((fpath, run_id))
+
+    if not pairs:
+        raise RuntimeError(f"[{stage_name}] No valid upstream inputs discovered.")
+
+    return pairs, upstream_sigs, mode
+
+
+def isoform_expected_outputs(run_id: str, first_tag: str | None, regionalized: bool) -> dict[str, Path]:
+    if regionalized:
+        first = first_tag or run_id
+        return {
+            "isoforms_bed": Path(f"{first}.isoforms.bed"),
+            "isoforms_gtf": Path(f"{first}.isoforms.gtf"),
+            "isoforms_bed_pattern": Path("{chrom}_{start}_{end}.isoforms.bed"),
+        }
+    else:
+        return {
+            "isoforms_bed": Path(f"{run_id}.isoforms.bed"),
+            "isoforms_gtf": Path(f"{run_id}.isoforms.gtf"),
+        }
+
+
+def run_ted_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
+    try:
+        from ..qc.ted import collect as ted_collect
+
+        ted_collect(stage_dir, cfg, upstreams=upstreams)
+        browser_dir = stage_dir / "transcriptome_browser"
+        if not browser_dir.exists() or not any(browser_dir.glob("*.png")):
+            raise RuntimeError("browser plot missing")
+        return {"TED": {"tsv": str(stage_dir / "TED.tsv")}}
+    except Exception as e:  # pragma: no cover - logging only
+        logging.warning(f"[{stage_name}] TED QC failed: {e}")
+        try:
+            (stage_dir / "TED.tsv").unlink()
+        except FileNotFoundError:
+            pass
+        return {}
+
+
+def build_flair_cmds(
+    subcmd: str,
+    pairs: list[tuple[Path, str]],
+    genome: Path,
+    reads: list[Path] | None,
+    run_id: str,
+    flag_parts: list[str],
+    regionalized: bool,
+    *,
+    use_bed: bool = False,
+    use_bam: bool = False,
+) -> list[list[str]]:
+    cmds: list[list[str]] = []
+    if regionalized:
+        for inp, tag in pairs:
+            cmds.append(
+                make_flair_cmd(
+                    subcmd,
+                    bed=inp if use_bed else None,
+                    bam=inp if use_bam else None,
+                    genome=genome,
+                    reads=reads,
+                    out=tag,
+                    flags=flag_parts,
+                )
+            )
+    else:
+        inp, _ = pairs[0]
+        cmds.append(
+            make_flair_cmd(
+                subcmd,
+                bed=inp if use_bed else None,
+                bam=inp if use_bam else None,
+                genome=genome,
+                reads=reads,
+                out=run_id,
+                flags=flag_parts,
+            )
+        )
+    return cmds
+
 def filter_file_by_regions(src: Path, out: Path, lookup, filetype: str):
     """
     Filter lines from src by region containment and write to out.
