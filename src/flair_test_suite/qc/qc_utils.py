@@ -29,9 +29,11 @@ import pysam
 from collections import Counter, defaultdict
 from multiprocessing import Pool, cpu_count
 import itertools
+import logging
 
 __all__ = [
     "count_lines",
+    "bed_is_empty",
     "percent",
     "parse_gtf_attributes",
     "iter_primary",
@@ -52,6 +54,17 @@ def count_lines(path: Path) -> int:
         subprocess.check_output(["wc", "-l", str(path)], text=True)
         .split()[0]
     )
+
+
+def bed_is_empty(path: Path) -> bool:
+    """Return True if `path` is missing or has zero data lines."""
+    try:
+        if (not path.exists()) or (path.stat().st_size == 0):
+            return True
+        return count_lines(path) == 0
+    except Exception as e:
+        logging.warning(f"[qc_utils] Failed to probe BED {path}: {e}; treating as empty.")
+        return True
 
 
 def percent(numerator: int, denominator: int, digits: int = 2) -> float:
