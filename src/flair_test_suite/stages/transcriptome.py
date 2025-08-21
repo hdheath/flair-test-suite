@@ -189,8 +189,10 @@ class TranscriptomeStage(StageBase):
         qc: dict = {}
         try:
             from ..qc.ted import collect as ted_collect
+
             ted_collect(stage_dir, self.cfg, upstreams=self.upstreams)
             qc["TED"] = {"tsv": str(stage_dir / "TED.tsv")}
+
         except Exception as e:  # pragma: no cover - logging only
             logging.warning(f"[transcriptome] TED QC failed: {e}")
         return qc
