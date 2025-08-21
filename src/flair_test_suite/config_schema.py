@@ -18,3 +18,4 @@ class RunConfig(BaseModel):
 class Config(BaseModel):
     run_id: Optional[str] = None
     run: RunConfig
+    qc: Optional[Dict[str, Any]] = Field(default_factory=dict)

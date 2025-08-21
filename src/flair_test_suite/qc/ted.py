@@ -529,6 +529,8 @@ def collect(
 
 
     peaks_cfg, window = _build_peaks_cfg(cfg, stage_name)
+    logging.info(f"[TED] Stage name for peak config: {stage_name}")
+    logging.info(f"[TED] Parsed peaks config: {peaks_cfg}")
 
     # Determine if this is regionalized by matching chr_start_end pattern
     iso_beds = sorted(stage_dir.glob("*.isoforms.bed"))
@@ -730,15 +732,25 @@ def collect(
 
         # peaks: global only
         peaks = {}
+        missing_peaks = []
+        logging.info(f"[TED] Looking for peak files in directory: {data_dir}")
         for key, conf in peaks_cfg.items():
             if not conf:
+                logging.error(f"[TED] Peaks config missing for key '{key}' in non-regionalized run; cannot proceed.")
+                missing_peaks.append(key)
                 peaks[key] = None
                 continue
             rp = _resolve(conf, data_dir)
+            logging.info(f"[TED] Resolving peak file for key '{key}': config='{conf}', resolved='{rp}'")
             if not (rp and rp.exists() and rp.stat().st_size > 0):
-                logging.warning(f"[TED] Peaks file for key '{key}' not found: {conf}")
-            peaks[key] = rp if (rp and rp.exists() and rp.stat().st_size > 0) else None
-        logging.debug(f"[TED] Single mode peaks resolved: { {k: str(v) if v else None for k, v in peaks.items()} }")
+                logging.error(f"[TED] Peaks file for key '{key}' not found at {rp}; required for non-regionalized run.")
+                missing_peaks.append(key)
+                peaks[key] = None
+            else:
+                peaks[key] = rp
+        logging.debug("[TED] Single mode peaks resolved: %s", {k: str(v) if v else None for k, v in peaks.items()})
+        if missing_peaks:
+            raise RuntimeError(f"[TED] Required peak files missing for keys: {', '.join(missing_peaks)}. Aborting non-regionalized run.")
         tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, "single")
 
         if stage_name == "collapse":
