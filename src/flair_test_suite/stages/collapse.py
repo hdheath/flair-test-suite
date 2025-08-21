@@ -7,7 +7,6 @@ from typing import List, Tuple
 
 from .base import StageBase
 from ..qc.qc_utils import bed_is_empty
-from ..qc import write_metrics
 from .stage_utils import read_region_details, make_flair_cmd
 ...
 # Force-load TED QC so Reinstate knows transcriptome has QC
@@ -170,8 +169,10 @@ class CollapseStage(StageBase):
         qc: dict = {}
         try:
             from ..qc.ted import collect as ted_collect
+
             ted_collect(stage_dir, self.cfg, upstreams=self.upstreams)
             qc["TED"] = {"tsv": str(stage_dir / "TED.tsv")}
+
         except Exception as e:
-            logging.warning(f"[transcriptome] TED QC failed: {e}")
+            logging.warning(f"[collapse] TED QC failed: {e}")
         return qc

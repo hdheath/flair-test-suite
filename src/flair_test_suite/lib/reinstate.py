@@ -39,22 +39,29 @@ class Reinstate:
         "run"   – otherwise run the external tool
         """
         marker_f = stage_dir / ".completed.json"
-        qc_tsv   = qc_sidecar_path(stage_dir, stage_name)
         marker_ok = marker_f.exists()
         primary_ok = primary.exists()
 
-        # For QC: need side‑car TSV *and* a "qc" block in marker
-        if needs_qc:
+        if needs_qc and stage_name in {"collapse", "transcriptome"}:
+            ted_tsv = stage_dir / "TED.tsv"
+            browser_dir = stage_dir / "transcriptome_browser"
+            browser_png = None
+            if browser_dir.exists():
+                browser_png = next(browser_dir.glob("*.png"), None)
+            qc_ok = ted_tsv.exists() and browser_png is not None
+            qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}, browser plot {'found' if browser_png else 'missing'}"
+        elif needs_qc:
             qc_tsv = qc_sidecar_path(stage_dir, stage_name)
-            # trust the TSV file, regardless of marker content
             qc_ok = qc_tsv.exists()
+            qc_desc = f"{qc_tsv} exists? {qc_ok}"
         else:
             qc_ok = True
+            qc_desc = "n/a"
 
         print(f"[Reinstate] Stage: {stage_name}")
         print(f"  Marker: {marker_f} exists? {marker_ok}")
         print(f"  Primary: {primary} exists? {primary_ok}")
-        print(f"  QC: {qc_tsv} exists? {qc_ok}")
+        print(f"  QC: {qc_desc}")
         print(f"  All files in {stage_dir}: {list(stage_dir.iterdir())}")
 
         if marker_ok and primary_ok and qc_ok:
