@@ -1,11 +1,15 @@
 import sys
 from pathlib import Path
+import types
 
 import pandas as pd
 import pytest
 
 # Make package importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
+
+sys.modules.setdefault("intervaltree", types.SimpleNamespace(IntervalTree=object))
+sys.modules.setdefault("pysam", types.SimpleNamespace(AlignedSegment=object))
 
 from flair_test_suite.qc import ted
 

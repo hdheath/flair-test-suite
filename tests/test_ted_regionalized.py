@@ -1,12 +1,17 @@
 import sys
 from pathlib import Path
+import types
 
 import pandas as pd
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / 'src'))
 
+sys.modules.setdefault('intervaltree', types.SimpleNamespace(IntervalTree=object))
+sys.modules.setdefault('pysam', types.SimpleNamespace(AlignedSegment=object))
+
 from flair_test_suite.qc import ted
+from flair_test_suite.lib import PathBuilder
 
 
 def test_collect_regionalized_resolves_peaks(tmp_path: Path, monkeypatch):
@@ -73,7 +78,8 @@ def test_collect_regionalized_resolves_peaks(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(ted, '_tss_tts_metrics_full', fake_metrics)
 
-    ted.collect(stage_dir, cfg)
+    reg_pb = PathBuilder(repo_root / 'outputs', run_id, 'regionalize', 'reg1')
+    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb})
 
     assert captured['prime5'] == reg_dir / f'{tag}_exp5.bed'
     assert captured['prime3'] == reg_dir / f'{tag}_exp3.bed'
@@ -135,7 +141,8 @@ def test_collect_regionalized_uses_stage_flags(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(ted, '_tss_tts_metrics_full', fake_metrics)
 
-    ted.collect(stage_dir, cfg)
+    reg_pb = PathBuilder(repo_root / 'outputs', run_id, 'regionalize', 'reg1')
+    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb})
 
     assert captured['prime5'] == reg_dir / f'{tag}_exp5.bed'
     assert captured['prime3'] == reg_dir / f'{tag}_exp3.bed'
