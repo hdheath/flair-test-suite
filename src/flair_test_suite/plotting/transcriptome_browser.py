@@ -164,27 +164,34 @@ def assign_read_rows(blocks_list):
     return assign, len(rows)
 
 
-def _parse_region(region: Optional[str]) -> Optional[Tuple[str, int, int]]:
-    """Parse a region string like 'chr1:100-200' into a tuple."""
+def _parse_region(region: Optional[str]) -> Tuple[Optional[Tuple[str, int, int]], bool]:
+    """
+    Parse a region string like ``"chr1:100-200"`` into a tuple and flag
+    whether the span is too large for plotting.
+
+    Returns a tuple ``(region_tuple, skip_plot)`` where ``region_tuple`` is
+    ``(chrom, start, end)`` if parsing succeeds or ``None`` otherwise, and
+    ``skip_plot`` is ``True`` when the span exceeds the 20kb plotting limit.
+    """
     if not region:
-        return None
+        return None, False
     m = re.match(r"^([^:]+):(\d+)-(\d+)$", region.replace(",", ""))
     if not m:
         logging.warning(f"Could not parse region string: {region}")
-        return None
+        return None, False
     chrom, start_s, end_s = m.groups()
     start_i, end_i = int(start_s), int(end_s)
     if end_i - start_i >= 20000:
         logging.warning("Region length >= 20000bp; skipping plot")
-        return None
-    return chrom, start_i, end_i
+        return (chrom, start_i, end_i), True
+    return (chrom, start_i, end_i), False
 
 
 def generate(cfg: Config, region: Optional[str] = None) -> None:
     """Generate plot from configuration (reads + isoform bars only)."""
-    region_tuple = _parse_region(region)
-    # If a region was supplied but parsing failed (e.g. too long), skip plotting
-    if region and not region_tuple:
+    region_tuple, skip_plot = _parse_region(region)
+    # If region string was supplied but couldn't be parsed, bail out
+    if region and region_tuple is None:
         return
     chrom = None
     r0 = r1 = None
@@ -522,6 +529,9 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     fig.subplots_adjust(bottom=0.18)  # Add more space at the bottom for x-label
 
     # save
+    if skip_plot:
+        plt.close(fig)
+        return
     out_png = outdir / f"{genome}_{contig}_{xmin}-{xmax}.png"
     fig.savefig(out_png, dpi=fig.dpi)
     plt.close(fig)
