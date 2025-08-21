@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .base import StageBase
-from .stage_utils import read_region_details, make_flair_cmd
+from .stage_utils import collect_upstream_pairs, make_flair_cmd
 from ..qc.correct_qc import run_qc
 from ..qc import write_metrics
 from ..qc.qc_utils import bed_is_empty
@@ -27,43 +27,19 @@ class CorrectStage(StageBase):
         # Use configured run version for signature (or override to detect flair --version)
         return str(self.cfg.run.version)
 
-    def _resolve_bed_files(self) -> Tuple[List[Tuple[Path, str]], Path | None]:
-        """Discover BED inputs from upstream stages."""
-
-        bed_files: List[Tuple[Path, str]] = []
-        upstream_sig: Path | None = None
-
-        if "regionalize" in self.upstreams:
-            reg_pb = self.upstreams["regionalize"]
-            upstream_sig = reg_pb.signature
-            details_path = reg_pb.stage_dir / "region_details.tsv"
-            if not details_path.exists():
-                raise RuntimeError(
-                    f"Expected region_details.tsv not found: {details_path}"
-                )
-            for chrom, start, end in read_region_details(details_path):
-                bed_file = reg_pb.stage_dir / f"{chrom}_{start}_{end}.bed"
-                if not bed_file.exists():
-                    raise RuntimeError(
-                        f"Expected region output BED not found: {bed_file}"
-                    )
-                bed_files.append((bed_file, f"{chrom}_{start}_{end}"))
-        elif "align" in self.upstreams:
-            aln_pb = self.upstreams["align"]
-            upstream_sig = aln_pb.signature
-            bed_file = aln_pb.stage_dir / f"{self.run_id}_flair.bed"
-            if not bed_file.exists():
-                raise RuntimeError(f"Expected align output BED not found: {bed_file}")
-            bed_files.append((bed_file, self.run_id))
-        else:
-            raise RuntimeError("No valid upstream found for correct stage.")
-
-        return bed_files, upstream_sig
+    def _resolve_bed_files(self) -> Tuple[List[Tuple[Path, str]], List[Path], str]:
+        return collect_upstream_pairs(
+            "correct",
+            self.upstreams,
+            self.run_id,
+            "flair.bed",
+            "{chrom}_{start}_{end}.bed",
+        )
 
     # -------- command builder (single source of truth) --------
     def build_cmds(self) -> List[List[str]]:
         cfg = self.cfg
-        self._bed_files, upstream_sig = self._resolve_bed_files()
+        self._bed_files, upstream_sigs, _ = self._resolve_bed_files()
 
         resolved = self.resolve_stage_inputs({
             "genome": cfg.run.genome_fa,
@@ -74,9 +50,12 @@ class CorrectStage(StageBase):
 
         flag_parts, extra_inputs = self.resolve_stage_flags()
         self._flags_components = flag_parts
-        self._hash_inputs = [genome] + [bf[0] for bf in self._bed_files] + extra_inputs
-        if upstream_sig:
-            self._hash_inputs.append(upstream_sig)
+        self._hash_inputs = [
+            genome,
+            *[bf[0] for bf in self._bed_files],
+            *upstream_sigs,
+            *extra_inputs,
+        ]
 
         align_meta = self.upstreams["align"].metadata
         self._n_input_reads = align_meta.get("n_input_reads", align_meta.get("n_total_reads"))

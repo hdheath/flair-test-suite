@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .base import StageBase
-from .stage_utils import read_region_details, make_flair_cmd
+from .stage_utils import (
+    collect_upstream_pairs,
+    build_flair_cmds,
+    isoform_expected_outputs,
+    run_ted_qc,
+)
 
 # Ensure TED QC is registered for this stage even if QC package isn't imported elsewhere
 try:  # pragma: no cover - best effort, optional dependency
@@ -44,52 +49,13 @@ class TranscriptomeStage(StageBase):
 
     # ───────────────────────── helpers ─────────────────────────
     def _collect_bams(self) -> Tuple[List[Tuple[Path, str]], List[Path], str]:
-        """
-        Returns: ([(bam_path, tag)], [upstream_signatures], mode)
-        mode ∈ {"regionalized", "standard"}
-        """
-        pairs: List[Tuple[Path, str]] = []
-        upstream_sigs: List[Path] = []
-
-        # Prefer regionalize if present
-        if "regionalize" in self.upstreams:
-            mode = "regionalized"
-            reg_pb = self.upstreams["regionalize"]
-            upstream_sigs.append(reg_pb.signature)
-
-            details = reg_pb.stage_dir / "region_details.tsv"
-            if not details.exists():
-                raise RuntimeError(
-                    f"[transcriptome] region_details.tsv not found: {details}"
-                )
-
-            for chrom, start, end in read_region_details(details):
-                tag = f"{chrom}_{start}_{end}"
-                bam = reg_pb.stage_dir / f"{tag}.bam"
-                if not bam.exists() or bam.stat().st_size == 0:
-                    logging.warning(
-                        f"[transcriptome] Missing/empty region BAM, skipping: {bam}"
-                    )
-                    continue
-                pairs.append((bam, tag))
-
-            if not pairs:
-                raise RuntimeError("[transcriptome] No non-empty per-region BAMs discovered.")
-
-            return pairs, upstream_sigs, mode
-
-        # Fallback: align
-        if "align" in self.upstreams:
-            mode = "standard"
-            aln_pb = self.upstreams["align"]
-            upstream_sigs.append(aln_pb.signature)
-            bam = aln_pb.stage_dir / f"{self.run_id}_flair.bam"
-            if not bam.exists() or bam.stat().st_size == 0:
-                raise RuntimeError(f"[transcriptome] Align BAM missing/empty: {bam}")
-            pairs.append((bam, self.run_id))
-            return pairs, upstream_sigs, mode
-
-        raise RuntimeError("[transcriptome] requires upstream `regionalize` or `align`.")
+        return collect_upstream_pairs(
+            "transcriptome",
+            self.upstreams,
+            self.run_id,
+            "flair.bam",
+            "{chrom}_{start}_{end}.bam",
+        )
 
     # ─────────────────── command builder ───────────────────
     def build_cmds(self) -> List[List[str]]:
@@ -123,37 +89,24 @@ class TranscriptomeStage(StageBase):
         flag_parts, extra_inputs = self.resolve_stage_flags()
 
         # Signature inputs: genome + all BAMs + upstream sigs + extra inputs
-        self._hash_inputs = [genome, *[bp[0] for bp in bam_pairs], *upstream_sigs, *extra_inputs]
+        self._hash_inputs = [
+            genome,
+            *[bp[0] for bp in bam_pairs],
+            *upstream_sigs,
+            *extra_inputs,
+        ]
         self._flags_components = flag_parts
 
-        cmds: List[List[str]] = []
-
-        if mode == "regionalized":
-            # One transcriptome call per region
-            for bam, tag in bam_pairs:
-                cmds.append(
-                    make_flair_cmd(
-                        "transcriptome",
-                        bam=bam,
-                        genome=genome,
-                        out=tag,
-                        flags=flag_parts,
-                    )
-                )
-                logging.info(f"[transcriptome] Scheduled per-region transcriptome: {tag}")
-        else:
-            # Single standard call
-            bam, _ = bam_pairs[0]
-            cmds.append(
-                make_flair_cmd(
-                    "transcriptome",
-                    bam=bam,
-                    genome=genome,
-                    out=self.run_id,
-                    flags=flag_parts,
-                )
-            )
-            logging.info(f"[transcriptome] Scheduled standard transcriptome: {self.run_id}")
+        cmds = build_flair_cmds(
+            "transcriptome",
+            bam_pairs,
+            genome,
+            None,
+            self.run_id,
+            flag_parts,
+            regionalized=(mode == "regionalized"),
+            use_bam=True,
+        )
 
         logging.debug(f"[transcriptome] mode={mode} commands={len(cmds)}")
         return cmds
@@ -170,31 +123,13 @@ class TranscriptomeStage(StageBase):
         - Regionalized: first region tag’s isoforms.bed
         - Standard: run_id.isoforms.bed
         """
-        if "regionalize" in self.upstreams:
-            first = self._first_tag or f"{self.run_id}"
-            return {
-                "isoforms_bed": Path(f"{first}.isoforms.bed"),
-                "isoforms_gtf": Path(f"{first}.isoforms.gtf"),
-                # (human hint only) pattern for the rest:
-                "isoforms_bed_pattern": Path("{chrom}_{start}_{end}.isoforms.bed"),
-            }
-        else:
-            base = self.run_id
-            return {
-                "isoforms_bed": Path(f"{base}.isoforms.bed"),
-                "isoforms_gtf": Path(f"{base}.isoforms.gtf"),
-            }
+        return isoform_expected_outputs(
+            self.run_id,
+            self._first_tag,
+            regionalized=(self._mode == "regionalized"),
+        )
 
     def _run_qc(self, stage_dir: Path, primary: Path, runtime: float | None) -> dict:
-        qc: dict = {}
-        try:
-            from ..qc.ted import collect as ted_collect
-
-            ted_collect(stage_dir, self.cfg, upstreams=self.upstreams)
-            qc["TED"] = {"tsv": str(stage_dir / "TED.tsv")}
-
-        except Exception as e:  # pragma: no cover - logging only
-            logging.warning(f"[transcriptome] TED QC failed: {e}")
-        return qc
+        return run_ted_qc(self.name, stage_dir, self.cfg, self.upstreams)
 
 
