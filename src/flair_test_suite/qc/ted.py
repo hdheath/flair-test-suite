@@ -551,8 +551,12 @@ def collect(stage_dir: Path, cfg) -> None:
             reg_dir_base = regionalize_pb.stage_dir
         else:
             # Fallback: try to infer from outputs/<run_id>/regionalize/<hash>
-            # Use the hash from the collapse/correct stage_dir if possible
-            hash_dir = stage_dir.parent.name
+            # ``stage_dir`` is <run>/<stage>/<hash>; the hash component is the
+            # name of ``stage_dir`` itself, not its parent.  Previously the
+            # parent directory name (e.g. ``collapse``) was used which produced
+            # paths like ``regionalize/collapse`` and caused sliced peak files
+            # to be missed.  Use the stage hash instead.
+            hash_dir = stage_dir.name
             reg_dir_base = stage_dir.parent.parent / 'regionalize' / hash_dir
         for iso_bed in regional_files:
             tag = iso_bed.stem.replace(".isoforms", "")
@@ -578,10 +582,18 @@ def collect(stage_dir: Path, cfg) -> None:
             assigned_reads = _read_map_unique_reads(map_txt)
             logging.debug(f"[TED] Region {tag} - n_iso: {n_iso}, n_genes_obs: {n_genes_obs}, assigned_reads: {assigned_reads}")
 
-            # Use the correct regionalize hash directory for peak files
-            reg_dir_for_tag = reg_dir_base
-            reg_gene_cnt = None
-            reg_tx_cnt = None
+            # Use region-index information when available to locate sliced
+            # peak files and expected counts.  Fall back to ``reg_dir_base``
+            # (best effort) when the tag is absent from the index.
+            rec = reg_index.get(tag)
+            if rec:
+                reg_dir_for_tag = rec.get('reg_dir')
+                reg_gene_cnt = rec.get('gene_count')
+                reg_tx_cnt = rec.get('transcript_count')
+            else:
+                reg_dir_for_tag = reg_dir_base
+                reg_gene_cnt = None
+                reg_tx_cnt = None
             reg_bam = (reg_dir_for_tag / f"{tag}.bam") if reg_dir_for_tag else None
 
             # peaks: prefer sliced if available
