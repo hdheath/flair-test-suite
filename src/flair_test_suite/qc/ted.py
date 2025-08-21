@@ -14,6 +14,7 @@ import pandas as pd
 from . import register, write_metrics  # QC plumbing
 from .qc_utils import count_lines
 from ..plotting import transcriptome_browser
+from ..lib import PathBuilder
 
 
 # Use module logger
@@ -300,18 +301,22 @@ def _dirs_with_file(root: Path, stage: str, fname: str) -> List[Path]:
     return dirs
 
 
-def _build_region_metrics_index(run_root: Path) -> Dict[str, Dict]:
+def _build_region_metrics_index(run_root: Path, regionalize_dir: Path | None = None) -> Dict[str, Dict]:
     """
-    Build index: region_tag -> {'gene_count', 'transcript_count', 'reg_dir'}
-    by scanning ALL regionalize/*/region_metrics.tsv.
+    Build index: region_tag -> {'gene_count', 'transcript_count', 'reg_dir'}.
+
+    If ``regionalize_dir`` is provided, only that directory is scanned.
+    Otherwise, scan all ``regionalize/*`` directories.
     """
     idx: Dict[str, Dict] = {}
-    regionalize_root = run_root / "regionalize"
-    if not regionalize_root.exists():
-        return idx
-    for d in regionalize_root.iterdir():
-        if not d.is_dir():
-            continue
+    if regionalize_dir is not None:
+        dirs = [regionalize_dir]
+    else:
+        regionalize_root = run_root / "regionalize"
+        if not regionalize_root.exists():
+            return idx
+        dirs = [d for d in regionalize_root.iterdir() if d.is_dir()]
+    for d in dirs:
         metrics = d / "region_metrics.tsv"
         if not metrics.exists():
             continue
@@ -485,7 +490,11 @@ def _tss_tts_metrics_full(iso_bed: Path, peaks: Dict[str, Optional[Path]], windo
 @register("ted")
 @register("collapse")
 @register("transcriptome")
-def collect(stage_dir: Path, cfg) -> None:
+def collect(
+    stage_dir: Path,
+    cfg,
+    upstreams: Dict[str, "PathBuilder"] | None = None,
+) -> None:
     """
     Writes:
       - TED.tsv: per-region rows if regionalized else one row
@@ -523,7 +532,9 @@ def collect(stage_dir: Path, cfg) -> None:
 
     # Determine if this is regionalized by matching chr_start_end pattern
     iso_beds = sorted(stage_dir.glob("*.isoforms.bed"))
-    regional_files = [p for p in iso_beds if _is_region_tag(p.stem.replace(".isoforms", ""))]
+    regional_files = [
+        p for p in iso_beds if _is_region_tag(p.stem.replace(".isoforms", ""))
+    ]
     is_regionalized = len(regional_files) > 0
     logging.debug(f"[TED] Isoform beds: {[p.name for p in iso_beds]}")
     logging.debug(f"[TED] Regional isoform beds: {[p.name for p in regional_files]}")
@@ -531,23 +542,25 @@ def collect(stage_dir: Path, cfg) -> None:
 
     # If no peak config for this stage and we're regionalized, fallback to regionalize stage config
     if is_regionalized and not any(peaks_cfg.values()):
-        logger.info(f"[TED] No peak config for stage '{stage_name}', falling back to 'regionalize' config for regionalized run.")
+        logger.info(
+            f"[TED] No peak config for stage '{stage_name}', falling back to 'regionalize' config for regionalized run."
+        )
         peaks_cfg, window = _build_peaks_cfg(cfg, "regionalize")
     logging.debug(f"[TED] Window: {window}")
     logging.debug(f"[TED] Peaks configuration (final): {peaks_cfg}")
 
-    # Build region metrics index across ALL regionalize runs
-    reg_index = _build_region_metrics_index(run_root)
+    regionalize_pb = (upstreams or {}).get("regionalize")
+    reg_index = _build_region_metrics_index(
+        run_root, regionalize_pb.stage_dir if regionalize_pb else None
+    )
 
     rows: List[Dict] = []
     audit_rows: List[Dict] = []
 
     if is_regionalized:
         # ── Regionalized: iterate over discovered isoform files
-        # Get the correct regionalize output directory from upstreams if available
-        regionalize_pb = getattr(cfg, 'upstreams', {}).get('regionalize', None)
-        reg_dir_base = None
-        if regionalize_pb is not None and hasattr(regionalize_pb, 'stage_dir'):
+        # Prefer the explicit regionalize PathBuilder when provided
+        if regionalize_pb is not None:
             reg_dir_base = regionalize_pb.stage_dir
         else:
             # Fallback: try to infer from outputs/<run_id>/regionalize/<hash>
@@ -557,7 +570,7 @@ def collect(stage_dir: Path, cfg) -> None:
             # paths like ``regionalize/collapse`` and caused sliced peak files
             # to be missed.  Use the stage hash instead.
             hash_dir = stage_dir.name
-            reg_dir_base = stage_dir.parent.parent / 'regionalize' / hash_dir
+            reg_dir_base = stage_dir.parent.parent / "regionalize" / hash_dir
         for iso_bed in regional_files:
             tag = iso_bed.stem.replace(".isoforms", "")
             logging.debug(f"[TED] Processing region tag: {tag}")
