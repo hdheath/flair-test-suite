@@ -55,7 +55,7 @@ class Reinstate:
                 qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}, browser plot {'found' if browser_png else 'missing'}"
             else:
                 qc_ok = ted_tsv.exists()
-                qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'} (non-regionalized, browser plot not required)"
+                qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}"
         elif needs_qc:
             qc_tsv = qc_sidecar_path(stage_dir, stage_name)
             qc_ok = qc_tsv.exists()
