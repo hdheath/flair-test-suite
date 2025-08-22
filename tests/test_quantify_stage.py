@@ -16,12 +16,14 @@ from flair_test_suite.lib.paths import PathBuilder
 
 
 @pytest.mark.skipif(not hasattr(StageBase, "run"), reason="StageBase missing run")
-def test_quantify_builds_manifest_and_cmd(tmp_path, monkeypatch):
+def test_quantify_uses_manifest_and_cmd(tmp_path, monkeypatch):
     repo_root = tmp_path
     data_dir = repo_root / "data"
     data_dir.mkdir()
     reads = data_dir / "reads.fq"
     reads.write_text("@r1\nAAAA\n+\n!!!!\n")
+    manifest = data_dir / "reads_manifest.tsv"
+    manifest.write_text(f"run1\tcondition1\tbatch1\t{reads}\n")
 
     cfg_dict = {
         "run_id": "run1",
@@ -30,8 +32,13 @@ def test_quantify_builds_manifest_and_cmd(tmp_path, monkeypatch):
             "conda_env": "env",
             "work_dir": str(repo_root / "outputs"),
             "data_dir": str(data_dir),
-            "reads_file": str(reads),
-            "stages": [{"name": "quantify", "requires": ["collapse"]}],
+            "stages": [
+                {
+                    "name": "quantify",
+                    "requires": ["collapse"],
+                    "flags": {"manifest": "reads_manifest.tsv"},
+                }
+            ],
         },
     }
     cfg = Cfg.model_validate(cfg_dict)
@@ -42,14 +49,16 @@ def test_quantify_builds_manifest_and_cmd(tmp_path, monkeypatch):
     iso_fa = collapse_dir / "run1.isoforms.fa"
     iso_fa.write_text(">iso1\nAAAA\n")
 
-    stage = QuantifyStage(cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb})
+    stage = QuantifyStage(
+        cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb}
+    )
 
     cmd = stage.build_cmd()
     assert cmd[:3] == ["flair", "quantify", "-r"]
     assert cmd[3] == "reads_manifest.tsv"
     assert "-i" in cmd and str(iso_fa) in cmd
 
-    expected_hash = {iso_fa, reads}
+    expected_hash = {iso_fa, reads, manifest}
     assert expected_hash.issubset(set(stage._hash_inputs))
 
     def fake_run_all(self, cmds, log_path, cwd):
@@ -63,17 +72,14 @@ def test_quantify_builds_manifest_and_cmd(tmp_path, monkeypatch):
     manifest_path = pb.stage_dir / "reads_manifest.tsv"
     assert manifest_path.exists()
     lines = manifest_path.read_text().splitlines()
-    assert len(lines) == 1
-    assert lines[0].split("\t") == ["run1", "condition1", "batch1", str(reads)]
+    assert lines == [f"run1\tcondition1\tbatch1\t{reads}"]
 
 
 @pytest.mark.skipif(not hasattr(StageBase, "run"), reason="StageBase missing run")
-def test_quantify_requires_manifest_for_combine(tmp_path):
+def test_quantify_requires_manifest(tmp_path):
     repo_root = tmp_path
     data_dir = repo_root / "data"
     data_dir.mkdir()
-    reads = data_dir / "reads.fq"
-    reads.write_text("@r1\nAAAA\n+\n!!!!\n")
 
     cfg_dict = {
         "run_id": "run1",
@@ -82,18 +88,19 @@ def test_quantify_requires_manifest_for_combine(tmp_path):
             "conda_env": "env",
             "work_dir": str(repo_root / "outputs"),
             "data_dir": str(data_dir),
-            "reads_file": str(reads),
-            "stages": [{"name": "quantify", "requires": ["combine"]}],
+            "stages": [{"name": "quantify", "requires": ["collapse"]}],
         },
     }
     cfg = Cfg.model_validate(cfg_dict)
 
-    combine_pb = PathBuilder(repo_root / "outputs", "run1", "combine", "sigC")
-    combine_dir = combine_pb.stage_dir
-    combine_dir.mkdir(parents=True)
-    (combine_dir / "run1.fa").write_text(">iso1\nAAAA\n")
+    collapse_pb = PathBuilder(repo_root / "outputs", "run1", "collapse", "sigC")
+    collapse_dir = collapse_pb.stage_dir
+    collapse_dir.mkdir(parents=True)
+    (collapse_dir / "run1.isoforms.fa").write_text(">iso1\nAAAA\n")
 
-    stage = QuantifyStage(cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"combine": combine_pb})
+    stage = QuantifyStage(
+        cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb}
+    )
 
     with pytest.raises(RuntimeError):
         stage.run()
