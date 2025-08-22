@@ -21,9 +21,13 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
     repo_root = tmp_path
     data_dir = repo_root / "data"
     data_dir.mkdir()
-    # user supplied sample
-    (data_dir / "s2.isoforms.bed").write_text("bed2")
-    (data_dir / "s2.isoforms.fa").write_text("fa2")
+    # user supplied sample and manifest
+    (data_dir / "s1.isoforms.bed").write_text("bed2")
+    (data_dir / "s1.isoforms.fa").write_text("fa2")
+    manifest_file = data_dir / "existing_manifest.tsv"
+    manifest_file.write_text(
+        f"1\tisoform\t{data_dir/'s1.isoforms.bed'}\t{data_dir/'s1.isoforms.fa'}\t\n"
+    )
 
     cfg_dict = {
         "run_id": "run1",
@@ -36,16 +40,7 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
                 {
                     "name": "combine",
                     "requires": ["collapse"],
-                    "flags": {
-                        "manifest": [
-                            {
-                                "sample": "s2",
-                                "type": "isoform",
-                                "bed": "s2.isoforms.bed",
-                                "fasta": "s2.isoforms.fa",
-                            }
-                        ]
-                    },
+                    "flags": {"manifest": "existing_manifest.tsv"},
                 }
             ],
         },
@@ -70,7 +65,7 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
     assert cmd[3] == "manifest.tsv"
     assert cmd[4:6] == ["-o", "run1"]
 
-    expected_hash = {collapse_bed, collapse_fa, collapse_rm, data_dir / "s2.isoforms.bed", data_dir / "s2.isoforms.fa"}
+    expected_hash = {collapse_bed, collapse_fa, collapse_rm, manifest_file}
     assert expected_hash.issubset(set(stage._hash_inputs))
 
     def fake_run_all(self, cmds, log_path, cwd):
@@ -85,8 +80,8 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
     assert manifest_path.exists()
     lines = manifest_path.read_text().splitlines()
     assert lines == [
-        f"run1\tisoform\t{collapse_bed}\t{collapse_fa}\t{collapse_rm}",
-        f"s2\tisoform\t{data_dir/'s2.isoforms.bed'}\t{data_dir/'s2.isoforms.fa'}\t",
+        f"1\tisoform\t{data_dir/'s1.isoforms.bed'}\t{data_dir/'s1.isoforms.fa'}\t",
+        f"2\tisoform\t{collapse_bed}\t{collapse_fa}\t{collapse_rm}",
     ]
 
 
@@ -137,4 +132,4 @@ def test_combine_defaults_to_collapse_output(tmp_path, monkeypatch):
     manifest_path = pb.stage_dir / "manifest.tsv"
     assert manifest_path.exists()
     lines = manifest_path.read_text().splitlines()
-    assert lines == [f"run1\tisoform\t{collapse_bed}\t\t"]
+    assert lines == [f"1\tisoform\t{collapse_bed}\t\t"]

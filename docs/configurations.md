@@ -129,11 +129,9 @@ requires = ["regionalize"]
 ## Combine stage manifest
 
 The `combine` stage merges multiple transcriptomes using a manifest TSV.
-By default the stage scans the collapse output directory and adds any
-`<sample>.isoforms.bed` files it finds, along with matching FASTA
-(`*.isoforms.fa`) and read-map (`*.isoform.read.map.txt`) files when
-present. Additional samples can be supplied via the `manifest` entry in
-`[run.stages.flags]`:
+Supply an existing manifest file via the `manifest` flag and the collapse
+output from the current run will be appended to the end of that file. If no
+manifest is provided, only the collapse output is used.
 
 ```toml
 [[run.stages]]
@@ -141,19 +139,17 @@ name = "combine"
 requires = ["collapse"]
 
 [run.stages.flags]
-[[run.stages.flags.manifest]]
-sample = "sample2"
-type = "isoform"
-bed = "sample2.isoforms.bed"
-fasta = "sample2.isoforms.fa"    # optional
-# read_map = "sample2.isoform.read.map.txt"  # optional
+manifest = "my_manifest.tsv"
 ```
 
 Each manifest row has five tab-separated columns:
 
 ``sample`` `type` `bed` `fasta` `read_map`
 
-Paths are resolved relative to `data_dir`. Leave `fasta` and
-`read_map` blank if those files are unavailable.
+The `sample` field must be a numeric identifier. When a manifest is
+provided, collapse outputs from the current run are appended using the next
+available sample number (maximum existing `sample` + 1). Paths are resolved
+relative to `data_dir`. Leave `fasta` and `read_map` blank if those files are
+unavailable.
 
 For more details, see the [FLAIR Test Suite Overview](./overview.md).
