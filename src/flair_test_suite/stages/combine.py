@@ -60,11 +60,17 @@ class CombineStage(StageBase):
 
         entries: List[ManifestEntry] = []
 
-        # Discover collapse outputs automatically
+        # Discover isoform outputs automatically from upstreams: prefer `collapse`,
+        # but also include `transcriptome` outputs when present.
         collapse_pb = self.upstreams.get("collapse")
-        if collapse_pb:
-            collapse_dir = collapse_pb.stage_dir
-            for bed in sorted(collapse_dir.glob("*.isoforms.bed")):
+        transcriptome_pb = self.upstreams.get("transcriptome")
+
+        def _collect_from(pb):
+            collected = 0
+            if not pb:
+                return collected
+            d = pb.stage_dir
+            for bed in sorted(d.glob("*.isoforms.bed")):
                 sample = bed.name[:-len(".isoforms.bed")]
                 fasta = bed.with_suffix(".fa")
                 fasta = fasta if fasta.exists() else None
@@ -73,8 +79,18 @@ class CombineStage(StageBase):
                 entries.append(
                     ManifestEntry(sample=sample, isoform_type="isoform", bed=bed, fasta=fasta, read_map=read_map)
                 )
-            if not entries:
-                logging.warning(f"[combine] collapse outputs missing in {collapse_dir}")
+                collected += 1
+            if collected == 0:
+                logging.debug(f"[combine] no isoforms found in upstream dir {d}")
+            return collected
+
+        collected = 0
+        collected += _collect_from(collapse_pb)
+        collected += _collect_from(transcriptome_pb)
+        if collected == 0:
+            # only warn if neither upstream provided any entries; user manifest may still be used
+            if collapse_pb or transcriptome_pb:
+                logging.warning(f"[combine] no isoform outputs found in collapse/transcriptome upstreams")
 
         # Load user manifest file if provided
         if manifest_src:
@@ -90,7 +106,11 @@ class CombineStage(StageBase):
 
         # parse remaining flags for CLI and signature
         flag_parts, extra_inputs = self.resolve_stage_flags(raw_flags)
-        upstream_sigs = [collapse_pb.signature] if collapse_pb else []
+        upstream_sigs = []
+        if collapse_pb:
+            upstream_sigs.append(collapse_pb.signature)
+        if transcriptome_pb:
+            upstream_sigs.append(transcriptome_pb.signature)
         hash_inputs: List[Path] = []
         if self._user_manifest:
             hash_inputs.append(self._user_manifest)
