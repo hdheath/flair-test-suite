@@ -56,7 +56,7 @@ __all__ = ["collect"]
 def collect(
     bam: Path,
     out_dir: Path,
-    n_input_reads: int,
+    n_input_reads: int | None,
     genome_fa: str,
     runtime_sec: float | None = None,
 ) -> dict:
@@ -66,7 +66,8 @@ def collect(
     Arguments:
       bam           : Path to aligned BAM file
       out_dir       : Directory to save QC outputs
-      n_input_reads : Number of input reads (for percentage calculations)
+      n_input_reads : Optional number of input reads; when provided a mapped
+                      percentage is calculated
       genome_fa     : Reference FASTA used for motif counting
       runtime_sec   : Time taken by the align stage (seconds)
 
@@ -78,7 +79,7 @@ def collect(
     # 1. Count retained reads and compute mapped percentage
     bed = bam.with_suffix(".bed")
     retained = count_lines(bed)
-    mapped_pct = percent(retained, n_input_reads)
+    mapped_pct = percent(retained, n_input_reads) if n_input_reads else None
 
     # 2. Extract MAPQ and read length distributions via samtools stats
     mapq_vals: list[int] = []

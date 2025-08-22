@@ -52,4 +52,6 @@ def test_parse_region_with_dash_in_chrom():
 
 
 def test_parse_region_too_long():
-    assert _parse_region("chr1:100-25000") == (("chr1", 100, 25000), True)
+    # Regions longer than the plotting limit now simply return the parsed tuple
+    # and leave span-based gating to the caller; skip_plot is always False.
+    assert _parse_region("chr1:100-25000") == (("chr1", 100, 25000), False)

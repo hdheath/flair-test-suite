@@ -3,15 +3,37 @@
 # shared helpers for Stage* classes.
 
 from __future__ import annotations
+import gzip
 import logging
 from pathlib import Path
 from typing import Iterable, Iterator, Tuple, List
 
+
 def count_reads(fp: Path) -> int:
-    """Return # reads in a FASTA/FASTQ file (cheap header scan)."""
-    if fp.suffix.lower() in {".fa", ".fasta"}:
-        return sum(1 for ln in fp.open() if ln.startswith(">"))
-    return sum(1 for _ in fp.open()) // 4
+    """Return number of reads in a FASTA or FASTQ file.
+
+    The original implementation relied solely on the filename suffix to
+    distinguish FASTA from FASTQ and could not handle gzipped inputs.  This
+    caused ``align`` and ``correct`` QC metrics such as *mapped_pct* to be
+    incorrect when the reads were provided as ``fastq`` files (or any gzipped
+    variant).  We now detect the format from the first character and transparently
+    decompress ``*.gz`` files so either format works.
+    """
+
+    opener = gzip.open if fp.suffix == ".gz" else open
+    with opener(fp, "rt") as fh:
+        first = fh.read(1)
+        fh.seek(0)
+        if first == ">":
+            # FASTA: count header lines
+            return sum(1 for ln in fh if ln.startswith(">"))
+        if first == "@":
+            # FASTQ: total lines divided by four
+            return sum(1 for _ in fh) // 4
+        # Fallback: guess from filename if the first char was unexpected
+        if fp.name.lower().endswith(('.fa', '.fasta', '.fa.gz', '.fasta.gz')):
+            return sum(1 for ln in fh if ln.startswith(">"))
+        return sum(1 for _ in fh) // 4
 
 
 def resolve_path(raw: str | Path, *, data_dir: Path) -> Path:
