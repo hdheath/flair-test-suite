@@ -103,7 +103,7 @@ class CombineStage(StageBase):
         self._hash_inputs = [*hash_inputs, *upstream_sigs, *extra_inputs]
         self._flags_components = flag_parts
 
-        cmd = ["flair", "combine", "-i", self._manifest_rel, "-o", self.run_id]
+        cmd = ["flair", "combine", "--manifest", self._manifest_rel, "-o", self.run_id]
         cmd.extend(flag_parts)
         return cmd
 
@@ -111,10 +111,15 @@ class CombineStage(StageBase):
         return None
 
     def expected_outputs(self) -> dict[str, Path]:
-        base = f"{self.run_id}_combined"
+        # FLAIR combine produces several artifacts: a merged BED, counts TSV,
+        # a FASTA of merged isoforms, and an isoform map file. Use the
+        # run_id as the base name to match the tool output.
+        base = f"{self.run_id}"
         return {
-            "combined_bed": Path(f"{base}.isoforms.bed"),
-            "combined_gtf": Path(f"{base}.isoforms.gtf"),
+            "combined_bed": Path(f"{base}.bed"),
+            "combined_counts": Path(f"{base}.counts.tsv"),
+            "combined_fasta": Path(f"{base}.fa"),
+            "combined_map": Path(f"{base}.isoform.map.txt"),
         }
 
     def _prepare_stage_dir(self):  # pragma: no cover - exercised via tests
