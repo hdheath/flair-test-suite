@@ -4,6 +4,7 @@ from .regionalize import RegionalizeStage
 from .collapse import CollapseStage
 from .combine import CombineStage
 from .transcriptome import TranscriptomeStage
+from .quantify import QuantifyStage
 
 
 STAGE_REGISTRY = {
@@ -13,4 +14,5 @@ STAGE_REGISTRY = {
     CollapseStage.name: CollapseStage,
     CombineStage.name: CombineStage,
     TranscriptomeStage.name: TranscriptomeStage,
+    QuantifyStage.name: QuantifyStage,
 }

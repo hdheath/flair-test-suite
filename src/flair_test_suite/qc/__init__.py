@@ -56,7 +56,7 @@ def write_metrics(stage_dir: Path, stage_name: str, metrics: dict):
 # ---------------------------------------------------------------------
 # 2) Auto‑import plug‑ins ---------------------------------------------
 # Dynamically load each collector module so its @register decorator runs
-for _name in ("align_qc", "correct_qc" , "regionalize_qc", "ted"):
+for _name in ("align_qc", "correct_qc" , "regionalize_qc", "ted", "quantify_qc"):
     import_module(f"{__name__}.{_name}")
 
 # Placeholder: add new QC collector modules here as needed
