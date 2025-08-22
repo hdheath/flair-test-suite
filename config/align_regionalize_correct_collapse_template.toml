@@ -82,3 +82,13 @@ requires = ["collapse"]
 
 [run.stages.flags]
 manifest = ""  # path to existing manifest TSV (collapse output appended)
+
+# ------------------------------------------------------------------------------------------------------------
+# -------- QUANTIFY ----------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------
+[[run.stages]]
+name = "quantify"
+requires = ["combine"]
+
+[run.stages.flags]
+manifest = ""  # required when combine is upstream

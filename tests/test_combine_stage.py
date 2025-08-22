@@ -61,7 +61,7 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
     )
 
     cmd = stage.build_cmd()
-    assert cmd[:3] == ["flair", "combine", "-i"]
+    assert cmd[:3] == ["flair", "combine", "--manifest"]
     assert cmd[3] == "manifest.tsv"
     assert cmd[4:6] == ["-o", "run1"]
 
@@ -69,8 +69,10 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
     assert expected_hash.issubset(set(stage._hash_inputs))
 
     def fake_run_all(self, cmds, log_path, cwd):
-        (cwd / "run1_combined.isoforms.bed").write_text("bed")
-        (cwd / "run1_combined.isoforms.gtf").write_text("gtf")
+        (cwd / "run1.bed").write_text("bed")
+        (cwd / "run1.counts.tsv").write_text("counts")
+        (cwd / "run1.fa").write_text("fa")
+        (cwd / "run1.isoform.map.txt").write_text("map")
         return 0
 
     monkeypatch.setattr(StageBase, "_run_all", fake_run_all)
@@ -117,13 +119,15 @@ def test_combine_defaults_to_collapse_output(tmp_path, monkeypatch):
     stage = CombineStage(cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb})
 
     cmd = stage.build_cmd()
-    assert cmd[:3] == ["flair", "combine", "-i"]
+    assert cmd[:3] == ["flair", "combine", "--manifest"]
     assert cmd[3] == "manifest.tsv"
     assert cmd[4:6] == ["-o", "run1"]
 
     def fake_run_all(self, cmds, log_path, cwd):
-        (cwd / "run1_combined.isoforms.bed").write_text("bed")
-        (cwd / "run1_combined.isoforms.gtf").write_text("gtf")
+        (cwd / "run1.bed").write_text("bed")
+        (cwd / "run1.counts.tsv").write_text("counts")
+        (cwd / "run1.fa").write_text("fa")
+        (cwd / "run1.isoform.map.txt").write_text("map")
         return 0
 
     monkeypatch.setattr(StageBase, "_run_all", fake_run_all)

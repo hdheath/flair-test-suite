@@ -20,7 +20,7 @@ STAGE_REGISTRY = stages_pkg.STAGE_REGISTRY
 
 def test_stage_registry_contains_expected_classes():
     """Ensure shipped stages are registered with their names."""
-    expected = {"align", "correct", "regionalize", "collapse", "combine", "transcriptome"}
+    expected = {"align", "correct", "regionalize", "collapse", "combine", "transcriptome", "quantify"}
     assert expected <= STAGE_REGISTRY.keys()
 
     dummy_cfg = types.SimpleNamespace(run=types.SimpleNamespace(data_dir=".", conda_env="env"))
