@@ -1,21 +1,37 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from .base import StageBase
 from .stage_utils import get_stage_config, resolve_path
 
 
+@dataclass
+class ManifestEntry:
+    """Representation of one row in the FLAIR combine manifest."""
+
+    sample: str
+    isoform_type: str
+    bed: Path
+    fasta: Optional[Path] = None
+    read_map: Optional[Path] = None
+
+
 class CombineStage(StageBase):
     """FLAIR combine stage.
 
-    Builds a manifest from isoform files and runs ``flair combine`` to merge
-    them. Any paths listed in the ``manifest`` key of the stage's ``flags``
-    block are added after the upstream collapse output, which is always
-    included automatically when present. Additional keys in ``flags`` are
-    treated as CLI options for ``flair combine``.
+    Builds a multi-column manifest describing isoform files and runs
+    ``flair combine`` to merge them. Collapse outputs are discovered
+    automatically. Additional entries may be provided via the ``manifest``
+    key under ``flags``. Each manifest row contains:
+
+    ``sample``\t``type``\t``bed``\t``fasta``\t``read_map``
+
+    where ``fasta`` and ``read_map`` are optional. Any extra keys in
+    ``flags`` are treated as CLI options for ``flair combine``.
     """
 
     name = "combine"
@@ -23,7 +39,7 @@ class CombineStage(StageBase):
     primary_output_key = "combined_bed"
 
     _manifest_rel = "manifest.tsv"
-    _manifest_entries: List[Path]
+    _manifest_entries: List[ManifestEntry]
 
     def __init__(self, cfg, run_id: str, work_dir: Path, upstreams=None):
         super().__init__(cfg, run_id, work_dir, upstreams)
@@ -39,44 +55,92 @@ class CombineStage(StageBase):
         raw_flags = dict(getattr(stage_cfg, "flags", {}) or {})
 
         manifest_sources = raw_flags.pop("manifest", [])
-        if isinstance(manifest_sources, (str, Path)):
+        if isinstance(manifest_sources, (str, Path, dict)):
             manifest_sources = [manifest_sources]
 
         data_dir = Path(cfg.run.data_dir)
-        # Start with collapse output(s) if present
-        manifest_paths: list[Path] = []
+
+        entries: List[ManifestEntry] = []
+
+        # Discover collapse outputs automatically
         collapse_pb = self.upstreams.get("collapse")
         if collapse_pb:
             collapse_dir = collapse_pb.stage_dir
-            for p in sorted(collapse_dir.glob("*.isoforms.bed")):
-                manifest_paths.append(p)
-            if not manifest_paths:
+            for bed in sorted(collapse_dir.glob("*.isoforms.bed")):
+                sample = bed.name[:-len(".isoforms.bed")]
+                fasta = bed.with_suffix(".fa")
+                fasta = fasta if fasta.exists() else None
+                read_map = bed.with_name(f"{sample}.isoform.read.map.txt")
+                read_map = read_map if read_map.exists() else None
+                entries.append(
+                    ManifestEntry(sample=sample, isoform_type="isoform", bed=bed, fasta=fasta, read_map=read_map)
+                )
+            if not entries:
                 logging.warning(f"[combine] collapse outputs missing in {collapse_dir}")
 
         # Append user-specified entries
         for item in manifest_sources:
-            p = resolve_path(item, data_dir=data_dir)
-            manifest_paths.append(p)
-            if not p.exists():
-                logging.warning(f"[combine] manifest entry missing: {p}")
+            if isinstance(item, dict):
+                bed = resolve_path(item.get("bed"), data_dir=data_dir)
+                sample = item.get("sample")
+                if not sample:
+                    sample = bed.name
+                    if sample.endswith(".isoforms.bed"):
+                        sample = sample[:-len(".isoforms.bed")]
+                    elif sample.endswith(".bed"):
+                        sample = sample[:-len(".bed")]
+                iso_type = item.get("type", "isoform")
+                fasta = item.get("fasta")
+                fasta = resolve_path(fasta, data_dir=data_dir) if fasta else None
+                read_map = item.get("read_map")
+                read_map = resolve_path(read_map, data_dir=data_dir) if read_map else None
+                if not bed.exists():
+                    logging.warning(f"[combine] manifest entry missing: {bed}")
+                if fasta and not fasta.exists():
+                    logging.warning(f"[combine] manifest fasta missing: {fasta}")
+                if read_map and not read_map.exists():
+                    logging.warning(f"[combine] manifest read_map missing: {read_map}")
+                entries.append(ManifestEntry(sample, iso_type, bed, fasta, read_map))
+            else:
+                bed = resolve_path(item, data_dir=data_dir)
+                sample = bed.name
+                if sample.endswith(".isoforms.bed"):
+                    sample = sample[:-len(".isoforms.bed")]
+                elif sample.endswith(".bed"):
+                    sample = sample[:-len(".bed")]
+                iso_type = "isoform"
+                fasta = bed.with_suffix(".fa")
+                fasta = fasta if fasta.exists() else None
+                read_map = bed.with_name(f"{sample}.isoform.read.map.txt")
+                read_map = read_map if read_map.exists() else None
+                if not bed.exists():
+                    logging.warning(f"[combine] manifest entry missing: {bed}")
+                entries.append(ManifestEntry(sample, iso_type, bed, fasta, read_map))
 
-        # De-duplicate while preserving order
+        # De-duplicate while preserving order by BED path
         seen: set[Path] = set()
-        unique_manifest = []
-        for p in manifest_paths:
-            if p not in seen:
-                unique_manifest.append(p)
-                seen.add(p)
+        unique_entries: List[ManifestEntry] = []
+        for e in entries:
+            if e.bed not in seen:
+                unique_entries.append(e)
+                seen.add(e.bed)
 
-        if not unique_manifest:
+        if not unique_entries:
             raise RuntimeError("[combine] no isoform files found for manifest")
 
-        self._manifest_entries = unique_manifest
+        self._manifest_entries = unique_entries
 
         # parse remaining flags for CLI and signature
         flag_parts, extra_inputs = self.resolve_stage_flags(raw_flags)
         upstream_sigs = [collapse_pb.signature] if collapse_pb else []
-        self._hash_inputs = [*unique_manifest, *upstream_sigs, *extra_inputs]
+        hash_inputs: List[Path] = []
+        for e in unique_entries:
+            hash_inputs.append(e.bed)
+            if e.fasta:
+                hash_inputs.append(e.fasta)
+            if e.read_map:
+                hash_inputs.append(e.read_map)
+        self._hash_inputs = [*hash_inputs, *upstream_sigs, *extra_inputs]
         self._flags_components = flag_parts
 
         cmd = ["flair", "combine", "-i", self._manifest_rel, "-o", self.run_id]
@@ -97,6 +161,8 @@ class CombineStage(StageBase):
         pb, outputs, primary, needs_qc = super()._prepare_stage_dir()
         manifest_path = pb.stage_dir / self._manifest_rel
         with manifest_path.open("w") as fh:
-            for p in self._manifest_entries:
-                fh.write(f"{p}\n")
+            for e in self._manifest_entries:
+                fasta = e.fasta or ""
+                read_map = e.read_map or ""
+                fh.write(f"{e.sample}\t{e.isoform_type}\t{e.bed}\t{fasta}\t{read_map}\n")
         return pb, outputs, primary, needs_qc

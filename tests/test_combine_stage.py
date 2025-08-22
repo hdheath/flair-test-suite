@@ -21,8 +21,9 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
     repo_root = tmp_path
     data_dir = repo_root / "data"
     data_dir.mkdir()
-    (data_dir / "s1.isoforms.bed").write_text("bed1")
+    # user supplied sample
     (data_dir / "s2.isoforms.bed").write_text("bed2")
+    (data_dir / "s2.isoforms.fa").write_text("fa2")
 
     cfg_dict = {
         "run_id": "run1",
@@ -35,7 +36,16 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
                 {
                     "name": "combine",
                     "requires": ["collapse"],
-                    "flags": {"manifest": ["s1.isoforms.bed", "s2.isoforms.bed"]},
+                    "flags": {
+                        "manifest": [
+                            {
+                                "sample": "s2",
+                                "type": "isoform",
+                                "bed": "s2.isoforms.bed",
+                                "fasta": "s2.isoforms.fa",
+                            }
+                        ]
+                    },
                 }
             ],
         },
@@ -45,14 +55,23 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
     collapse_pb = PathBuilder(repo_root / "outputs", "run1", "collapse", "sigC")
     collapse_dir = collapse_pb.stage_dir
     collapse_dir.mkdir(parents=True)
-    collapse_out = collapse_dir / "run1.isoforms.bed"
-    collapse_out.write_text("bedc")
-    stage = CombineStage(cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb})
+    collapse_bed = collapse_dir / "run1.isoforms.bed"
+    collapse_bed.write_text("bedc")
+    collapse_fa = collapse_dir / "run1.isoforms.fa"
+    collapse_fa.write_text("fac")
+    collapse_rm = collapse_dir / "run1.isoform.read.map.txt"
+    collapse_rm.write_text("rmc")
+    stage = CombineStage(
+        cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb}
+    )
 
     cmd = stage.build_cmd()
     assert cmd[:3] == ["flair", "combine", "-i"]
     assert cmd[3] == "manifest.tsv"
     assert cmd[4:6] == ["-o", "run1"]
+
+    expected_hash = {collapse_bed, collapse_fa, collapse_rm, data_dir / "s2.isoforms.bed", data_dir / "s2.isoforms.fa"}
+    assert expected_hash.issubset(set(stage._hash_inputs))
 
     def fake_run_all(self, cmds, log_path, cwd):
         (cwd / "run1_combined.isoforms.bed").write_text("bed")
@@ -64,11 +83,10 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
     pb = stage.run()
     manifest_path = pb.stage_dir / "manifest.tsv"
     assert manifest_path.exists()
-    lines = manifest_path.read_text().strip().splitlines()
+    lines = manifest_path.read_text().splitlines()
     assert lines == [
-        str(collapse_out),
-        str(data_dir / "s1.isoforms.bed"),
-        str(data_dir / "s2.isoforms.bed"),
+        f"run1\tisoform\t{collapse_bed}\t{collapse_fa}\t{collapse_rm}",
+        f"s2\tisoform\t{data_dir/'s2.isoforms.bed'}\t{data_dir/'s2.isoforms.fa'}\t",
     ]
 
 
@@ -98,8 +116,8 @@ def test_combine_defaults_to_collapse_output(tmp_path, monkeypatch):
     collapse_pb = PathBuilder(repo_root / "outputs", "run1", "collapse", "sigC")
     collapse_dir = collapse_pb.stage_dir
     collapse_dir.mkdir(parents=True)
-    collapse_out = collapse_dir / "run1.isoforms.bed"
-    collapse_out.write_text("bedc")
+    collapse_bed = collapse_dir / "run1.isoforms.bed"
+    collapse_bed.write_text("bedc")
 
     stage = CombineStage(cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb})
 
@@ -118,5 +136,5 @@ def test_combine_defaults_to_collapse_output(tmp_path, monkeypatch):
     pb = stage.run()
     manifest_path = pb.stage_dir / "manifest.tsv"
     assert manifest_path.exists()
-    lines = manifest_path.read_text().strip().splitlines()
-    assert lines == [str(collapse_out)]
+    lines = manifest_path.read_text().splitlines()
+    assert lines == [f"run1\tisoform\t{collapse_bed}\t\t"]
