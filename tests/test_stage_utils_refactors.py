@@ -71,3 +71,29 @@ def test_build_flair_cmds_basic(tmp_path):
         use_bed=True,
     )
     assert cmds == [["flair", "collapse", "-g", "gen.fa", "-r", "reads.fa", "-q", "in.bed", "-o", "run1", "--foo"]]
+
+
+def test_count_reads_handles_fastx(tmp_path):
+    from flair_test_suite.stages.stage_utils import count_reads
+    # FASTA
+    fa = tmp_path / "reads.fa"
+    fa.write_text(">r1\nAAA\n>r2\nTTT\n")
+    assert count_reads(fa) == 2
+
+    # FASTQ
+    fq = tmp_path / "reads.fq"
+    fq.write_text("@r1\nAAA\n+\nIII\n@r2\nTTT\n+\nIII\n")
+    assert count_reads(fq) == 2
+
+    # gzipped FASTA
+    fa_gz = tmp_path / "reads.fa.gz"
+    import gzip
+    with gzip.open(fa_gz, "wt") as fh:
+        fh.write(">r1\nAAA\n>r2\nTTT\n")
+    assert count_reads(fa_gz) == 2
+
+    # gzipped FASTQ
+    fq_gz = tmp_path / "reads.fastq.gz"
+    with gzip.open(fq_gz, "wt") as fh:
+        fh.write("@r1\nAAA\n+\nIII\n@r2\nTTT\n+\nIII\n")
+    assert count_reads(fq_gz) == 2
