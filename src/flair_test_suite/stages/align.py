@@ -15,10 +15,6 @@ from .base import StageBase       # base class providing orchestration logic
 from .stage_utils import count_reads, make_flair_cmd
 
 class AlignStage(StageBase):
-    """
-    Run `flair align` and record input-read count for QC.
-    Inherits common behavior (run(), signature, skip/QC logic) from StageBase.
-    """
     name = "align"
 
     def build_cmd(self) -> list[str]:
@@ -26,28 +22,35 @@ class AlignStage(StageBase):
 
         # --- resolve input paths ---
         raw_reads = getattr(cfg, "reads_file", None) or cfg.run.reads_file
-        resolved = self.resolve_stage_inputs({
-            "genome": cfg.run.genome_fa,
-            "reads": raw_reads,
-        })
-        genome = resolved["genome"]
-        reads = resolved["reads"]
+        genome = self.resolve_stage_inputs({"genome": cfg.run.genome_fa})["genome"]
+
+        # normalize reads to list
+        if isinstance(raw_reads, (str, Path)):
+            raw_reads = [raw_reads]
+        if not isinstance(raw_reads, list):
+            raise TypeError("reads_file must be a string or list of strings/paths")
+
+        # resolve each read path against data_dir
+        resolved_reads = [
+            self.resolve_stage_inputs({"reads": r})["reads"] for r in raw_reads
+        ]
         self._genome_fa_abs = str(genome)
 
-        # --- count reads for QC and warn if zero ---
-        self._n_input_reads = count_reads(reads)
+        # --- count reads across all files ---
+        total_reads = sum(count_reads(r) for r in resolved_reads)
+        self._n_input_reads = total_reads
         if self._n_input_reads == 0:
-            logging.warning(f"No reads counted in {reads}")
+            logging.warning(f"No reads counted in any input files: {resolved_reads}")
 
         # --- inputs that affect the signature ---
-        self._hash_inputs = [reads, genome]
+        self._hash_inputs = resolved_reads + [genome]
 
-        # --- parse flags and extra inputs using StageBase helper ---
+        # --- parse flags and extra inputs ---
         flag_parts, extra_inputs = self.resolve_stage_flags()
         self._hash_inputs.extend(extra_inputs)
         self._flags_components = flag_parts
 
-        # --- capture `flair --version` once per run to include in signature ---
+        # --- capture `flair --version` once per run ---
         if not hasattr(self, "_tool_version"):
             try:
                 raw = subprocess.check_output(
@@ -59,19 +62,23 @@ class AlignStage(StageBase):
                 logging.warning("Could not run `flair --version`; using 'flair-unknown'")
                 self._tool_version = "flair-unknown"
 
-        # --- warn if no extra flags were supplied ---
         if not flag_parts:
             logging.warning("No extra flags configured for align stage; using defaults")
 
         # --- construct and return the final command list ---
         out_prefix = f"{self.run_id}_flair"
+
+        # Flair expects one -r arg with comma-separated files
+        reads_arg = ",".join(str(r) for r in resolved_reads)
+
         return make_flair_cmd(
             "align",
             genome=genome,
-            reads=reads,
+            reads=reads_arg,   # <--- now a single string: file1,file2
             out=out_prefix,
             flags=flag_parts,
         )
+
 
     @property
     def tool_version(self) -> str:

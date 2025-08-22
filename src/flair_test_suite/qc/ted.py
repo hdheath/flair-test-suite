@@ -702,7 +702,15 @@ def collect(
             # ── Optional transcriptome browser plot ──
             try:
                 gtf_path = stage_dir / f"{tag}.isoforms.gtf"
-                if (
+                # Guard large regions here in TED so the plotting module doesn't need
+                # to perform the 20kb span check itself.  Skip generating the browser
+                # for very large regions to avoid expensive or useless plots.
+                span = int(end_i - start_i + 1)
+                # Allow regions of exactly 20000bp; only skip when span > 20000
+                if span > 20000:
+                    logging.info(f"[TED] Skipping transcriptome browser for {tag}: region span {span} > 20000bp")
+                    # still record the skip in audit/logs; do not call the plotting code
+                elif (
                     transcriptome_browser
                     and reg_bam
                     and gtf_path.exists()

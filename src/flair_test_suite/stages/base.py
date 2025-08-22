@@ -76,17 +76,38 @@ class StageBase(ABC):
 
     # ─────────────────────────────── Public helpers ─────────────────────────────
 
-    def resolve_stage_inputs(self, inputs: dict[str, str | Path]) -> dict[str, Path]:
-        """Resolve stage inputs relative to cfg.run.data_dir and warn if missing."""
+    def resolve_stage_inputs(self, inputs: dict[str, object]) -> dict[str, object]:
+        """
+        Resolve stage inputs relative to cfg.run.data_dir and warn if missing.
+
+        Accepts values that are a single path (str/Path) or a list/tuple of such
+        values. Returns a dict mapping the same keys to resolved Path or
+        list[Path].
+        """
         from .stage_utils import resolve_path
 
         data_dir = Path(self.cfg.run.data_dir)
-        resolved: dict[str, Path] = {}
+        resolved: dict[str, object] = {}
         for key, raw in inputs.items():
-            p = resolve_path(raw, data_dir=data_dir)
-            resolved[key] = p
-            if not p.exists():
-                logging.warning(f"[{self.name}] Input file missing: {key} -> {p}")
+            # Normalize None
+            if raw is None:
+                resolved[key] = None
+                continue
+
+            # Handle iterables (list/tuple) of path-like values
+            if isinstance(raw, (list, tuple)):
+                paths = []
+                for item in raw:
+                    p = resolve_path(item, data_dir=data_dir)
+                    paths.append(p)
+                    if not p.exists():
+                        logging.warning(f"[{self.name}] Input file missing: {key} -> {p}")
+                resolved[key] = paths
+            else:
+                p = resolve_path(raw, data_dir=data_dir)
+                resolved[key] = p
+                if not p.exists():
+                    logging.warning(f"[{self.name}] Input file missing: {key} -> {p}")
         return resolved
 
     def resolve_stage_flags(self, raw_flags=None) -> tuple[list[str], list[Path]]:

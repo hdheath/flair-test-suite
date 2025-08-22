@@ -181,9 +181,10 @@ def _parse_region(region: Optional[str]) -> Tuple[Optional[Tuple[str, int, int]]
         return None, False
     chrom, start_s, end_s = m.groups()
     start_i, end_i = int(start_s), int(end_s)
-    if end_i - start_i >= 20000:
-        logging.warning("Region length >= 20000bp; skipping plot")
-        return (chrom, start_i, end_i), True
+    # Do not decide to skip plotting here; leave span-based gating to the
+    # caller (e.g., TED) so that policy is centralized. Always return the
+    # parsed region tuple and let the caller decide whether to invoke the
+    # plotting routine for very large regions.
     return (chrom, start_i, end_i), False
 
 
