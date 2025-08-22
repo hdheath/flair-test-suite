@@ -157,9 +157,8 @@ For more details, see the [FLAIR Test Suite Overview](./overview.md).
 ## Quantify stage manifest
 
 The `quantify` stage computes isoform and gene expression using a reads
-manifest. It can follow `collapse`, `transcriptome`, or `combine`. If
-`combine` is an upstream stage, a manifest file is **required** to list all
-FASTQ files used to generate the combined isoforms.
+manifest. It can follow `collapse`, `transcriptome`, or `combine`. A manifest
+file is **required** to list all FASTQ files used for expression quantification.
 
 ```toml
 [[run.stages]]
@@ -167,7 +166,7 @@ name = "quantify"
 requires = ["collapse"]   # or ["transcriptome"] or ["combine"]
 
 [run.stages.flags]
-manifest = "reads_manifest.tsv"  # optional unless combine is upstream
+manifest = "reads_manifest.tsv"
 ```
 
 Each manifest row has four tab-separated columns:
