@@ -62,4 +62,4 @@ name = "combine"
 requires = ["collapse"]
 
 [run.stages.flags]
-manifest = []
+manifest = ""  # path to existing manifest TSV (collapse output appended)
