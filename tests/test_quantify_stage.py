@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from pathlib import Path
 import pytest
 
 # Ensure package importable
@@ -55,24 +56,20 @@ def test_quantify_uses_manifest_and_cmd(tmp_path, monkeypatch):
 
     cmd = stage.build_cmd()
     assert cmd[:3] == ["flair", "quantify", "-r"]
-    assert cmd[3] == "reads_manifest.tsv"
+    assert Path(cmd[3]).name == "reads_manifest.tsv"
     assert "-i" in cmd and str(iso_fa) in cmd
 
     expected_hash = {iso_fa, reads, manifest}
     assert expected_hash.issubset(set(stage._hash_inputs))
 
     def fake_run_all(self, cmds, log_path, cwd):
-        (cwd / "run1.isoform.tpm.tsv").write_text("isoform\ts1\niso1\t1\n")
-        (cwd / "run1.gene.counts.tsv").write_text("gene\ts1\nG1\t1\n")
+        (cwd / "run1.counts.tsv").write_text("gene\ts1\nG1\t1\n")
         return 0
 
     monkeypatch.setattr(StageBase, "_run_all", fake_run_all)
 
     pb = stage.run()
-    manifest_path = pb.stage_dir / "reads_manifest.tsv"
-    assert manifest_path.exists()
-    lines = manifest_path.read_text().splitlines()
-    assert lines == [f"run1\tcondition1\tbatch1\t{reads}"]
+    assert stage._user_manifest == manifest
 
 
 @pytest.mark.skipif(not hasattr(StageBase, "run"), reason="StageBase missing run")

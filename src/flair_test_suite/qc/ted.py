@@ -215,11 +215,10 @@ def _read_map_unique_reads(map_path: Path) -> int:
 def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, Optional[str]], int]:
     """Collect peak file configuration for a stage.
 
-    Peak BED paths may be specified either under ``[qc.<stage>.TED]`` or as
-    flags in ``[run.stages.<stage>.flags]``.  The latter is a common case when
-    running regionalized pipelines where the QC section is omitted to keep
-    configuration minimal.  This helper merges the two sources and returns both
-    the resolved mapping and the window size.
+    Peak BED paths may be specified under ``[qc.<stage>.TED]``, via shared
+    run-level inputs, or as flags in ``[run.stages.<stage>.flags]`` for backward
+    compatibility.  This helper merges the sources in that precedence order and
+    returns both the resolved mapping and the window size.
     """
 
     qc_block = _cfg_get(cfg, ["qc", stage_name, "TED"], {}) or {}
@@ -230,6 +229,19 @@ def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, Optional[str]], in
         "ref_prime5": qc_block.get("reference_5_prime_regions_bed_file"),
         "ref_prime3": qc_block.get("reference_3_prime_regions_bed_file"),
     }
+
+    # Run-level shared inputs
+    run_cfg = getattr(cfg, "run", None)
+    if run_cfg:
+        run_map = {
+            "prime5": getattr(run_cfg, "experiment_5_prime_regions_bed_file", None),
+            "prime3": getattr(run_cfg, "experiment_3_prime_regions_bed_file", None),
+            "ref_prime5": getattr(run_cfg, "reference_5_prime_regions_bed_file", None),
+            "ref_prime3": getattr(run_cfg, "reference_3_prime_regions_bed_file", None),
+        }
+        for key, val in run_map.items():
+            if not peaks_cfg[key] and val:
+                peaks_cfg[key] = val
 
     if not all(peaks_cfg.values()):
         stage_flags: Dict[str, Optional[str]] = {}

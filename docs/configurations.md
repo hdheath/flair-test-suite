@@ -26,7 +26,7 @@ Select one of the four supported workflows and copy its template from `configs/`
 Once you have selected and copied a template, you can edit it by : 
 
 1. Set `run_id` under `[run]` to name your output folder.
-2. Edit the six fields under `[run]`: `version`, `conda_env`, `work_dir`, `data_dir`, `reads_file`, `genome_fa`.
+2. Edit the fields under `[run]`: `version`, `conda_env`, `work_dir`, `data_dir`, `reads_file`, `genome_fa`, and any shared inputs such as `gtf`, `regions_tsv`, `junctions`, or peak BED files.
 3. Add any CLI flags under each `[run.stages.flags]`; leave blank to use FLAIR defaults.
   **⚠️** Do not use -o flag
 
@@ -73,6 +73,13 @@ work_dir   = "./outputs"            # output directory
 data_dir   = "./tests/data"         # input data directory
 reads_file = "WTC11_reads.fasta"    # long-read FASTA
 genome_fa  = "gr38.gtf"             # reference genome FASTA
+gtf                                 = "hs_GENCODE38.basic_annotation.gtf"
+regions_tsv                         = "regions_of_interest.tsv"
+junctions                           = "WTC11.tab"                 # optional
+experiment_5_prime_regions_bed_file = ""                          # optional
+experiment_3_prime_regions_bed_file = ""                          # optional
+reference_5_prime_regions_bed_file  = ""                          # optional
+reference_3_prime_regions_bed_file  = ""                          # optional
 
 # ------------------------------------------------------------------------------------------------------------
 # -------- ALIGN ------------------------------------------------------
@@ -106,13 +113,6 @@ name     = "regionalize"
 requires = ["correct"]
 
 [run.stages.flags]
-gtf                                 = "hs_GENCODE38.basic_annotation.gtf"
-regions_tsv                         = "regions_of_interest.tsv"
-junctions                           = "WTC11.tab"                 # optional
-experiment_5_prime_regions_bed_file = ""                          # optional
-experiment_3_prime_regions_bed_file = ""                          # optional
-reference_5_prime_regions_bed_file  = ""                          # optional
-reference_3_prime_regions_bed_file  = ""                          # optional
 
 # ------------------------------------------------------------------------------------------------------------
 # -------- COLLAPSE ----------------------------------------------------

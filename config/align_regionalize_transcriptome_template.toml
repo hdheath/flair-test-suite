@@ -2,30 +2,37 @@
 # Align -> Slice -> Transcriptome Configuration
 # ------------------------------------------------------------------------------------------------------------
 # -------------------------------------------- Test Case Description -----------------------------------------
-# 
+#
 # - Organism:
-# - Sample(s): 
+# - Sample(s):
 # - Assembly:
 # - Platform:
 #
-# -------------------------------------------- Region Selection 
+# -------------------------------------------- Region Selection
 #
 #
 # -------------------------------------------- Summary
-# 
+#
 # ------------------------------------------------------------------------------------------------------------
 
 run_id  = ""       # base-name to save under (eg. "WTC11")
 
 [run]
-version    = ""	   # version of FLAIR (eg. "2.0.0")
-conda_env  = ""	   # name of user installed conda FLAIR env (eg. "flair2")
+version    = ""    # version of FLAIR (eg. "2.0.0")
+conda_env  = ""    # name of user installed conda FLAIR env (eg. "flair2")
 work_dir   = ""    # where output will be saved - relative to test suite (eg. "./outputs")
 
 # shared inputs
-data_dir   = ""		# where data lives for run
-reads_file = ""		# reads fasta 
+data_dir   = ""         # where data lives for run
+reads_file = ""         # reads fasta
 genome_fa  = ""     # reference genome fasta
+gtf = ""             # annotation GTF
+regions_tsv = ""    # (eg regions_of_interest.tsv)
+junctions = ""                                        # optional
+experiment_5_prime_regions_bed_file = ""  # optional
+experiment_3_prime_regions_bed_file = ""  # optional
+reference_5_prime_regions_bed_file =  ""  # optional
+reference_3_prime_regions_bed_file =  ""  # optional
 
 # ------------------------------------------------------------------------------------------------------------
 # -------- ALIGN ------------------------------------------------------
@@ -39,22 +46,17 @@ name = "align"
 # ------------------------------------------------------------------------------------------------------------
 # -------- REGIONALIZE ----------------------------------------------------
 # ------------------------------------------------------------------------------------------------------------
+
 [[run.stages]]
 name = "regionalize"
 requires = ["align"]
 
 [run.stages.flags]
-gtf = ""	
-regions_tsv = ""    # (eg regions_of_interest.tsv)
-junctions = ""   			              # optional
-experiment_5_prime_regions_bed_file = ""  # optional
-experiment_3_prime_regions_bed_file = ""  # optional
-reference_5_prime_regions_bed_file =  ""  # optional
-reference_3_prime_regions_bed_file =  ""  # optional
 
 # ------------------------------------------------------------------------------------------------------------
 # -------- TRANSCRIPTOME ----------------------------------------------------
 # ------------------------------------------------------------------------------------------------------------
+
 [[run.stages]]
 name = "transcriptome"
 requires = ["regionalize"]
@@ -64,9 +66,11 @@ requires = ["regionalize"]
 # ------------------------------------------------------------------------------------------------------------
 # -------- QUANTIFY ----------------------------------------------------
 # ------------------------------------------------------------------------------------------------------------
+
 [[run.stages]]
 name = "quantify"
 requires = ["transcriptome"]
 
 [run.stages.flags]
 manifest = ""  # optional
+
