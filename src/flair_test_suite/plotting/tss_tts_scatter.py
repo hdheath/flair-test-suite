@@ -248,6 +248,10 @@ def generate(
         hy_s, yed_s = _compute_hist(y_s, nbins=N_s, data_min=ymin, data_max=ymax)
         hx_s = np.clip(hx_s, None, 240)
         hy_s = np.clip(hy_s, None, 240)
+        # Dynamic count cap: use actual histogram max rounded to 5, but no more than 250
+        data_max_count = int(max(hx_s.max() if hx_s.size > 0 else 0, hy_s.max() if hy_s.size > 0 else 0))
+        cap = max(5, int(math.ceil(data_max_count / 5.0) * 5))
+        cap = min(250, cap)
 
         fig = plt.figure(figsize=(10, 5), dpi=600)
         orig_mx, orig_left_w, orig_bot_h, orig_bot_w, orig_top_h = (
@@ -303,7 +307,7 @@ def generate(
         cbar = fig.colorbar(sm, cax=cax_l, orientation="vertical", ticks=[0, color_cap])
         cbar.ax.set_yticklabels(["0", str(color_cap)], fontsize=9)
         cbar.ax.tick_params(axis="y", length=4)
-        bw = xed_s[1] - xed_s[0]
+        bw = xed_s[1] - xed_s[0] if len(xed_s) > 1 else 1
         ax_top_l.bar(
             xed_s[:-1],
             hx_s,
@@ -316,11 +320,11 @@ def generate(
         ax_top_l.set(xlim=(xmin, xmax))
         ax_top_l.xaxis.set_major_formatter(coord_formatter)
         ax_top_l.set_xticks([])
-        ax_top_l.set_yticks([0, 250])
-        ax_top_l.set_yticklabels(["0", "250"], fontsize=9)
+        ax_top_l.set_yticks([0, cap])
+        ax_top_l.set_yticklabels(["0", str(cap)], fontsize=9)
         ax_top_l.tick_params(axis="y", labelsize=9)
         ax_top_l.set_ylabel("Count", fontsize=9)
-        bh = yed_s[1] - yed_s[0]
+        bh = yed_s[1] - yed_s[0] if len(yed_s) > 1 else 1
         ax_left_l.barh(
             yed_s[:-1],
             -hy_s,
@@ -333,8 +337,8 @@ def generate(
         ax_left_l.set(ylim=(ymin, ymax))
         ax_left_l.yaxis.set_major_formatter(coord_formatter)
         ax_left_l.set_yticks(np.linspace(ymin, ymax, 5))
-        ax_left_l.set_xticks([-250, 0])
-        ax_left_l.set_xticklabels(["250", "0"], fontsize=9)
+        ax_left_l.set_xticks([-cap, 0])
+        ax_left_l.set_xticklabels([str(cap), "0"], fontsize=9)
         ax_left_l.tick_params(axis="both", labelsize=9)
         ax_left_l.set_ylabel(f"TSS ({unit_label})", fontsize=9)
 
@@ -347,7 +351,7 @@ def generate(
                 if n_cl <= 20
                 else ListedColormap(plt.get_cmap("hsv", n_cl).colors)
             )
-            ax_top_r.set(xlim=(xmin, xmax), ylim=(0, 250))
+            ax_top_r.set(xlim=(xmin, xmax), ylim=(0, cap))
             ax_top_r.xaxis.set_major_formatter(coord_formatter)
             ax_top_r.set_xticks([])
             ax_top_r.set_yticks([])
@@ -360,14 +364,14 @@ def generate(
                     Rectangle(
                         (e["tts_min"], 0),
                         e["tts_max"] - e["tts_min"],
-                        250,
+                        cap,
                         facecolor=color,
                         edgecolor=color,
                         alpha=0.5,
                         linewidth=0,
                     )
                 )
-            ax_left_r.set(ylim=(ymin, ymax), xlim=(-250, 0))
+            ax_left_r.set(ylim=(ymin, ymax), xlim=(-cap, 0))
             ax_left_r.yaxis.set_major_formatter(coord_formatter)
             ax_left_r.set_yticks(np.linspace(ymin, ymax, 5))
             ax_left_r.set_xticks([])
@@ -377,8 +381,8 @@ def generate(
                 color = cmap(list(uniq).index(cl)) if cl in uniq else "black"
                 ax_left_r.add_patch(
                     Rectangle(
-                        (-250, e["tss_min"]),
-                        250,
+                        (-cap, e["tss_min"]),
+                        cap,
                         e["tss_max"] - e["tss_min"],
                         facecolor=color,
                         edgecolor=color,
@@ -387,11 +391,11 @@ def generate(
                     )
                 )
         else:
-            ax_top_r.set(xlim=(xmin, xmax), ylim=(0, 250))
+            ax_top_r.set(xlim=(xmin, xmax), ylim=(0, cap))
             ax_top_r.xaxis.set_major_formatter(coord_formatter)
             ax_top_r.set_xticks([])
             ax_top_r.set_yticks([])
-            ax_left_r.set(ylim=(ymin, ymax), xlim=(-250, 0))
+            ax_left_r.set(ylim=(ymin, ymax), xlim=(-cap, 0))
             ax_left_r.yaxis.set_major_formatter(coord_formatter)
             ax_left_r.set_yticks(np.linspace(ymin, ymax, 5))
             ax_left_r.set_xticks([])

@@ -216,6 +216,134 @@ def _read_map_unique_reads(map_path: Path) -> int:
     return len(uniq)
 
 
+def _synthesize_mapping_from_map_and_bam(
+    map_path: Path,
+    bam_path: Optional[Path],
+    iso_bed: Path,
+    chrom: str,
+    region_start: Optional[int],
+    region_end: Optional[int],
+    out_dir: Path,
+) -> Optional[Path]:
+    """Create a mapping TSV compatible with tss_tts_scatter from an
+    isoform.read.map.txt and a region BAM.
+
+    Returns path to generated TSV or None on failure.
+    """
+    if not map_path or not map_path.exists():
+        logger.debug(f"[TED] No isoform.read.map.txt to synthesize mapping: {map_path}")
+        return None
+    if not bam_path or not bam_path.exists():
+        logger.warning(f"[TED] Cannot synthesize mapping: BAM not found: {bam_path}")
+        return None
+
+    # Parse isoform->reads map
+    iso_to_reads: Dict[str, set] = {}
+    with open(map_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or "\t" not in line:
+                continue
+            left, rhs = line.split("\t", 1)
+            iso = left.strip()
+            reads = {r.strip() for r in rhs.split(",") if r.strip()}
+            if reads:
+                iso_to_reads.setdefault(iso, set()).update(reads)
+
+    if not iso_to_reads:
+        logger.warning(f"[TED] isoform.read.map.txt contained no assignments: {map_path}")
+        return None
+
+    # Load isoform strands from BED (fallback to read strand if missing)
+    iso_strand: Dict[str, str] = {}
+    try:
+        df_iso = _read_bed6(iso_bed)
+        if not df_iso.empty:
+            for _, r in df_iso.iterrows():
+                # Name column may be present at col 3 in BED; try to extract from file name
+                # We only used _read_bed6 which returns Chrom,Start,End,Strand; need Name separately
+                pass
+    except Exception:
+        # ignore — we'll infer strand from reads
+        pass
+
+    # Fetch reads from BAM in region and collect coords
+    try:
+        import pysam
+    except Exception:
+        logger.warning("[TED] pysam not available; cannot synthesize mapping from BAM")
+        return None
+
+    read_names_needed = set(r for s in iso_to_reads.values() for r in s)
+    read_coords: Dict[str, Tuple[str, int, int, str]] = {}
+    try:
+        with pysam.AlignmentFile(str(bam_path), "rb") as bf:
+            # iterate over region if provided, else whole file (but limit to reads we need)
+            iterator = bf.fetch(chrom, region_start, region_end) if (region_start is not None and region_end is not None) else bf.fetch()
+            for rd in iterator:
+                if rd.is_unmapped or rd.is_secondary or rd.is_supplementary:
+                    continue
+                qn = rd.query_name
+                if qn not in read_names_needed:
+                    continue
+                start = rd.reference_start
+                end = rd.reference_end - 1 if rd.reference_end is not None else rd.reference_end
+                strand = '-' if rd.is_reverse else '+'
+                tss = start if strand == '+' else end
+                tts = end if strand == '+' else start
+                read_coords[qn] = (bf.get_reference_name(rd.reference_id), int(tss), int(tts), strand)
+                # early exit if we've seen all
+                if len(read_coords) >= len(read_names_needed):
+                    break
+    except Exception as e:
+        logger.warning(f"[TED] Error reading BAM while synthesizing mapping: {e}")
+        return None
+
+    # Build mapping rows per-isoform
+    rows = []
+    from collections import Counter
+    for iso, reads in iso_to_reads.items():
+        coords = [read_coords[r] for r in reads if r in read_coords]
+        if not coords:
+            continue
+        # filter to same chrom
+        coords = [c for c in coords if c[0] == chrom]
+        if not coords:
+            continue
+        tss_list = [c[1] for c in coords]
+        tts_list = [c[2] for c in coords]
+        strands = [c[3] for c in coords]
+        # most frequent tss coordinate
+        most_tss = Counter(tss_list).most_common(1)[0][0]
+        strand_mode = Counter(strands).most_common(1)[0][0]
+        tss_min, tss_max = min(tss_list), max(tss_list)
+        tts_min, tts_max = min(tts_list), max(tts_list)
+        # small padding
+        pad = max(1, int((tss_max - tss_min) * 0.05))
+        tss_min_p, tss_max_p = tss_min - pad, tss_max + pad
+        pad2 = max(1, int((tts_max - tts_min) * 0.05))
+        tts_min_p, tts_max_p = tts_min - pad2, tts_max + pad2
+        most_freq_coord = f"{chrom}:{most_tss}"
+        all_tx_ids = iso
+        joint_window = f"{tss_min_p}-{tss_max_p}|{tts_min_p}-{tts_max_p}"
+        rows.append({
+            "most_freq_coord": most_freq_coord,
+            "all_tx_ids": all_tx_ids,
+            "joint_window": joint_window,
+            "strand": strand_mode,
+        })
+
+    if not rows:
+        logger.warning("[TED] No mapping rows synthesized from reads")
+        return None
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_p = out_dir / (map_path.stem + ".synth.mapping.tsv")
+    pd.DataFrame(rows).to_csv(out_p, sep="\t", index=False)
+    logger.info(f"[TED] Wrote synthesized mapping TSV: {out_p}")
+    return out_p
+
+
 def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, Optional[str]], int]:
     """Collect peak file configuration for a stage.
 
@@ -718,18 +846,46 @@ def collect(
             # ── Optional scatter plot for collapsed isoforms ──
             try:
                 span = int(end_i - start_i + 1)
-                if span > 20000:
+                if span > 100000:
                     logging.info(
-                        f"[TED] Skipping scatter plot for {tag}: region span {span} > 20000bp"
+                        f"[TED] Skipping TSS/TTS scatter plot for {tag}: region span {span} > 100000bp"
                     )
                 elif tss_tts_scatter:
                     outdir = stage_dir / "qc"
                     out_png = outdir / "scatter.png"
+                    # Validate existing mapping TSV; synthesize if missing or malformed
+                    map_arg = map_txt if map_txt.exists() else None
+                    if map_arg is not None:
+                        try:
+                            tmpdf = pd.read_csv(map_arg, sep="\t", dtype=str, nrows=1)
+                            required = {"most_freq_coord", "all_tx_ids", "joint_window", "strand"}
+                            if not required.issubset(set(tmpdf.columns)):
+                                logger.debug(f"[TED] Mapping file {map_arg} missing required columns; attempting to synthesize from BAM")
+                                synth = _synthesize_mapping_from_map_and_bam(map_txt, reg_bam, iso_bed, chrom, start_i, end_i, outdir)
+                                if synth:
+                                    map_arg = synth
+                                else:
+                                    map_arg = None
+                        except Exception:
+                            logger.debug(f"[TED] Could not read mapping file {map_arg}; attempting to synthesize from BAM")
+                            synth = _synthesize_mapping_from_map_and_bam(map_txt, reg_bam, iso_bed, chrom, start_i, end_i, outdir)
+                            if synth:
+                                map_arg = synth
+                            else:
+                                map_arg = None
+                    else:
+                        # Try to synthesize from isoform.read.map.txt and BAM
+                        synth = _synthesize_mapping_from_map_and_bam(map_txt, reg_bam, iso_bed, chrom, start_i, end_i, outdir)
+                        if synth:
+                            map_arg = synth
+                        else:
+                            map_arg = None
+
                     tss_tts_scatter.generate(
                         coords=iso_bed,
                         chrom=chrom,
                         region=(int(start_i), int(end_i)),
-                        mapping=map_txt if map_txt.exists() else None,
+                        mapping=map_arg,
                         output=out_png,
                     )
                 else:
