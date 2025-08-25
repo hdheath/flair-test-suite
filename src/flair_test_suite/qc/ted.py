@@ -14,9 +14,9 @@ import pandas as pd
 from . import register, write_metrics  # QC plumbing
 from .qc_utils import count_lines
 try:  # pragma: no cover - optional dependency
-    from ..plotting import transcriptome_browser
+    from ..plotting import tss_tts_scatter
 except Exception:  # pragma: no cover - handle missing heavy deps
-    transcriptome_browser = None
+    tss_tts_scatter = None
 from ..lib import PathBuilder
 
 
@@ -711,41 +711,30 @@ def collect(
                 logging.debug(f"[TED] No regionalize index entry for {tag}; expected metrics defaulted to 0")
             rows.append(row)
 
-            # ── Optional transcriptome browser plot ──
+            # ── Optional scatter plot for collapsed isoforms ──
             try:
-                gtf_path = stage_dir / f"{tag}.isoforms.gtf"
-                # Guard large regions here in TED so the plotting module doesn't need
-                # to perform the 20kb span check itself.  Skip generating the browser
-                # for very large regions to avoid expensive or useless plots.
                 span = int(end_i - start_i + 1)
-                # Allow regions of exactly 20000bp; only skip when span > 20000
                 if span > 20000:
-                    logging.info(f"[TED] Skipping transcriptome browser for {tag}: region span {span} > 20000bp")
-                    # still record the skip in audit/logs; do not call the plotting code
-                elif (
-                    transcriptome_browser
-                    and reg_bam
-                    and gtf_path.exists()
-                ):
-                    outdir = stage_dir / "transcriptome_browser"
-                    cfg_tb = transcriptome_browser.Config(
-                        bam=reg_bam,
-                        gtf=gtf_path,
-                        genome=str(run_id),
-                        outdir=outdir,
-                        mapping=map_txt if map_txt.exists() else None,
-                        collapsed_isoforms=iso_bed,
+                    logging.info(
+                        f"[TED] Skipping scatter plot for {tag}: region span {span} > 20000bp"
                     )
-                    transcriptome_browser.generate(
-                        cfg_tb, region=f"{chrom}:{start_i}-{end_i}"
+                elif tss_tts_scatter:
+                    outdir = stage_dir / "qc"
+                    out_png = outdir / "scatter.png"
+                    tss_tts_scatter.generate(
+                        coords=iso_bed,
+                        chrom=chrom,
+                        region=(int(start_i), int(end_i)),
+                        mapping=map_txt if map_txt.exists() else None,
+                        output=out_png,
                     )
                 else:
                     logging.warning(
-                        f"[TED] Skipping transcriptome browser for {tag}: missing BAM, GTF, or dependency"
+                        f"[TED] Skipping scatter plot for {tag}: dependency missing"
                     )
             except Exception as e:
                 logging.warning(
-                    f"[TED] transcriptome browser failed for region {tag}: {e}"
+                    f"[TED] scatter plot failed for region {tag}: {e}"
                 )
     else:
         # ── Single (non-regionalized): one row ──
