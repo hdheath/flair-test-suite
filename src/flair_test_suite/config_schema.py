@@ -75,6 +75,14 @@ class RunConfig(BaseModel):
         return deduped
 
     genome_fa: Optional[str] = None
+    # Shared optional inputs available to multiple stages
+    gtf: Optional[str] = None
+    regions_tsv: Optional[str] = None
+    junctions: Optional[str] = None
+    experiment_5_prime_regions_bed_file: Optional[str] = None
+    experiment_3_prime_regions_bed_file: Optional[str] = None
+    reference_5_prime_regions_bed_file: Optional[str] = None
+    reference_3_prime_regions_bed_file: Optional[str] = None
     stages: List[StageConfig]
 
 class Config(BaseModel):

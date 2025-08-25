@@ -67,9 +67,9 @@ class RegionalizeStage(StageBase):
         # Flags
         flags = next(st.flags for st in cfg.run.stages if st.name == "regionalize")
 
-        gtf = flags.get("gtf")
+        gtf = getattr(cfg.run, "gtf", None) or flags.get("gtf")
         if not gtf:
-            raise RuntimeError("No GTF specified in regionalize stage flags.")
+            raise RuntimeError("No GTF specified in regionalize inputs")
         self._gtf_path = resolve_path(gtf, data_dir=data_dir)
 
         override_bed = flags.get("bed")
@@ -82,9 +82,9 @@ class RegionalizeStage(StageBase):
         else:
             raise RuntimeError("No valid BED file found for regionalize stage.")
 
-        regions_tsv = flags.get("regions_tsv")
+        regions_tsv = getattr(cfg.run, "regions_tsv", None) or flags.get("regions_tsv")
         if not regions_tsv:
-            raise RuntimeError("No regions_tsv specified in regionalize stage flags.")
+            raise RuntimeError("No regions_tsv specified in regionalize inputs")
         regions_tsv_path = resolve_path(regions_tsv, data_dir=data_dir)
         self._regions: List[Region] = _read_regions(regions_tsv_path)
 
@@ -107,7 +107,7 @@ class RegionalizeStage(StageBase):
         ]
         self._optional: Dict[str, Path] = {}
         for k in opt_keys:
-            v = flags.get(k)
+            v = getattr(cfg.run, k, None) or flags.get(k)
             if v:
                 p = resolve_path(v, data_dir=data_dir)
                 self._optional[k] = p
