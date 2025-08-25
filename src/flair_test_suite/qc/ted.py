@@ -17,6 +17,10 @@ try:  # pragma: no cover - optional dependency
     from ..plotting import tss_tts_scatter
 except Exception:  # pragma: no cover - handle missing heavy deps
     tss_tts_scatter = None
+try:  # pragma: no cover - optional dependency
+    from ..plotting import transcriptome_browser
+except Exception:  # pragma: no cover - handle missing heavy deps
+    transcriptome_browser = None
 from ..lib import PathBuilder
 
 
@@ -732,6 +736,30 @@ def collect(
                     logging.warning(
                         f"[TED] Skipping scatter plot for {tag}: dependency missing"
                     )
+                # Also attempt transcriptome browser plot for small regions
+                try:
+                    if span <= 20000:
+                        if transcriptome_browser:
+                            outdir = stage_dir / "qc"
+                            # Resolve GTF from config if present
+                            gtf_cfg = _cfg_get(cfg, ["run", "gtf"], None)
+                            gtf_path = _resolve(gtf_cfg, data_dir) if gtf_cfg else None
+                            # Use regional BAM if available; transcriptome_browser will fall back to provided BAM
+                            bam_for_browser = reg_bam if (reg_bam and reg_bam.exists()) else None
+                            cfg_obj = transcriptome_browser.Config(
+                                gtf=gtf_path if gtf_path else Path("."),
+                                bam=bam_for_browser,
+                                genome="",
+                                outdir=outdir,
+                                mapping=map_txt if map_txt.exists() else None,
+                                collapsed_isoforms=iso_bed if iso_bed.exists() else None,
+                            )
+                            region_str = f"{chrom}:{int(start_i)}-{int(end_i)}"
+                            transcriptome_browser.generate(cfg_obj, region=region_str)
+                        else:
+                            logging.warning(f"[TED] Skipping transcriptome browser plot for {tag}: dependency missing")
+                except Exception as e:
+                    logging.warning(f"[TED] transcriptome browser plot failed for region {tag}: {e}")
             except Exception as e:
                 logging.warning(
                     f"[TED] scatter plot failed for region {tag}: {e}"
