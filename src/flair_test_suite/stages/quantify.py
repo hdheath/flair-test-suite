@@ -11,14 +11,14 @@ from .stage_utils import get_stage_config, resolve_path
 class QuantifyStage(StageBase):
     """FLAIR quantify stage.
 
-    Builds a reads manifest and runs ``flair quantify`` using isoform FASTA
+    Uses a user-inputted reads manifest to run ``flair quantify`` using isoform FASTA
     discovered from upstream ``combine``, ``transcriptome``, or ``collapse``
-    outputs. Users must supply a reads manifest describing all samples.
+    outputs.
     """
 
     name = "quantify"
     requires: tuple[str, ...] = ()
-    primary_output_key = "isoform_tpm"
+    primary_output_key = "counts"
 
     _manifest_rel = "reads_manifest.tsv"
 
@@ -112,7 +112,7 @@ class QuantifyStage(StageBase):
             "flair",
             "quantify",
             "-r",
-            self._manifest_rel,
+            str(self._user_manifest),
             "-i",
             str(isoforms_fa),
             "-o",
@@ -126,12 +126,10 @@ class QuantifyStage(StageBase):
 
     # ------------------------------------------------------------------
     def expected_outputs(self) -> dict[str, Path]:
+        # Use the combined counts TSV as the primary artifact for quantify
         base = f"{self.run_id}"
         return {
-            "isoform_tpm": Path(f"{base}.isoform.tpm.tsv"),
-            "gene_counts": Path(f"{base}.gene.counts.tsv"),
-            "isoform_counts": Path(f"{base}.isoform.counts.tsv"),
-            "gene_tpm": Path(f"{base}.gene.tpm.tsv"),
+            "counts": Path(f"{base}.counts.tsv"),
         }
 
     # ------------------------------------------------------------------
@@ -139,10 +137,6 @@ class QuantifyStage(StageBase):
         pb, outputs, primary, needs_qc = super()._prepare_stage_dir()
         if not self._user_manifest:
             raise RuntimeError("[quantify] manifest file is required; provide via flags.manifest")
-        manifest_path = pb.stage_dir / self._manifest_rel
-        content = self._user_manifest.read_text()
-        manifest_path.write_text(content)
-        if content and not content.endswith("\n"):
-            with manifest_path.open("a") as fh:
-                fh.write("\n")
+    # Use the user-supplied manifest in-place (do not copy into the stage dir).
+    # The manifest must be accessible at the resolved path when the stage runs.
         return pb, outputs, primary, needs_qc
