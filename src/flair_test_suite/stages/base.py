@@ -161,17 +161,26 @@ class StageBase(ABC):
         return pb, outputs, primary, needs_qc
 
     def _decide_action(self, stage_dir: Path, primary: Path, needs_qc: bool) -> StageAction:
-        decision = Reinstate.decide(stage_dir, primary, needs_qc=needs_qc, stage_name=self.name)
+        decision = Reinstate.decide(
+            stage_dir, primary, needs_qc=needs_qc, stage_name=self.name
+        )
         if decision == "run":
             if primary.exists():
-                logging.warning(f"Primary output exists before run for {self.name}; will overwrite")
-            return StageAction.RUN
-        if decision == "skip":
-            return StageAction.SKIP
-        if decision == "qc":
-            logging.warning(f"Primary exists but QC incomplete for {self.name}; regenerating QC")
-            return StageAction.QC_ONLY
-        raise ValueError(f"Unknown Reinstate decision: {decision}")
+                logging.warning(
+                    f"Primary output exists before run for {self.name}; will overwrite"
+                )
+            result = StageAction.RUN
+        elif decision == "skip":
+            result = StageAction.SKIP
+        elif decision == "qc":
+            logging.warning(
+                f"Primary exists but QC incomplete for {self.name}; regenerating QC"
+            )
+            result = StageAction.QC_ONLY
+        else:
+            raise ValueError(f"Unknown Reinstate decision: {decision}")
+        logging.info(f"[{self.name}] action: {result}")
+        return result
 
     def _handle_skip(self, pb: PathBuilder) -> PathBuilder:
         logging.info(f"[SKIP] {self.name} complete (sig={self.signature})")
@@ -199,6 +208,9 @@ class StageBase(ABC):
         start_ts = time.time()
         exit_code = self._run_all(cmds, log_path=stage_dir / "tool.log", cwd=stage_dir)
         runtime_sec = round(time.time() - start_ts, 2)
+        logging.info(
+            f"[{self.name}] commands finished in {runtime_sec}s (exit {exit_code})"
+        )
         return runtime_sec, exit_code, start_ts
 
     def _validate_primary_output(self, primary: Path) -> None:
@@ -303,12 +315,15 @@ class StageBase(ABC):
             if hasattr(self, "_read_count_method"):
                 kwargs["read_count_method"] = getattr(self, "_read_count_method")
             if self.name == "align":
-                return qc_func(
+                metrics = qc_func(
                     primary,
                     genome_fa=genome_fa,
                     **kwargs,
                 )
-            return qc_func(primary, **kwargs)
+            else:
+                metrics = qc_func(primary, **kwargs)
+            logging.info(f"QC metrics for {self.name}: {metrics}")
+            return metrics
         except Exception as e:
             logging.info(f"QC for '{self.name}' failed: {e}")
             return {}

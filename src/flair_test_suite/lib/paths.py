@@ -7,7 +7,27 @@
 from __future__ import annotations
 import hashlib  # for checksum helper
 from pathlib import Path  # for filesystem path operations
-import os 
+import os
+
+
+def format_path(p: Path, root: Path | None = None) -> str:
+    """Return a user-friendly string for ``p``.
+
+    Paths inside ``root`` are rendered relative to it; otherwise ``os.path.relpath``
+    is used. The current user's home directory is collapsed to ``~``.
+    """
+    p = Path(p).expanduser()
+    if root is not None:
+        try:
+            p = p.resolve().relative_to(Path(root).resolve())
+        except ValueError:
+            p = Path(os.path.relpath(p, root))
+    home = Path.home()
+    try:
+        p = Path("~") / p.relative_to(home)
+    except ValueError:
+        pass
+    return str(p)
 
 
 class PathBuilder:
