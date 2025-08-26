@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import re
@@ -647,22 +648,37 @@ def collect(
     stage_dir: Path,
     cfg,
     upstreams: Dict[str, "PathBuilder"] | None = None,
+    *,
+    out_dir: Optional[Path] = None,
 ) -> None:
     """
     Writes:
       - TED.tsv: per-region rows if regionalized else one row
       - TED.audit.tsv: everything we touched + counts
+      - Transcriptome browser images under ``out_dir/transcriptome_browser``
       - TED sidecar with simple totals (no means)
     Implements:
       * region_genes_expected / region_isoforms_expected via an index over ALL regionalize dirs
       * assigned_pct denominator: 
           - collapse: corrected BED line count (per-region if regionalized, else single)
           - transcriptome: primary alignments in BAM (per-region regional BAM, else full align BAM)
+    Parameters
+    ----------
+    stage_dir : Path
+        Stage directory containing isoform BEDs/GTfs.
+    cfg : object
+        Parsed config object.
+    upstreams : dict[str, PathBuilder] | None
+        Optional upstream PathBuilders.
+    out_dir : Path | None
+        Directory where outputs should be written. Defaults to ``stage_dir``.
     """
     logging.debug("[TED] Starting TED QC collection.")
     stage_name = stage_dir.parent.name           # collapse | transcriptome
     run_root = stage_dir.parent.parent           # .../outputs/<run_id>
     run_id = run_root.name
+    out_dir = out_dir or stage_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
     logging.debug(f"[TED] Stage name: {stage_name}, Run ID: {run_id}")
 
     data_dir_cfg = Path(_cfg_get(cfg, ["run", "data_dir"], "."))
@@ -711,6 +727,7 @@ def collect(
 
     rows: List[Dict] = []
     audit_rows: List[Dict] = []
+    browser_paths: Dict[str, str] = {}
 
     if is_regionalized:
         # ── Regionalized: iterate over discovered isoform files
@@ -851,7 +868,7 @@ def collect(
                         f"[TED] Skipping TSS/TTS scatter plot for {tag}: region span {span} > 100000bp"
                     )
                 elif tss_tts_scatter:
-                    outdir = stage_dir / "qc"
+                    outdir = out_dir
                     out_png = outdir / "scatter.png"
                     # Validate existing mapping TSV; synthesize if missing or malformed
                     map_arg = map_txt if map_txt.exists() else None
@@ -896,7 +913,7 @@ def collect(
                 try:
                     if span <= 20000:
                         if transcriptome_browser:
-                            outdir = stage_dir / "qc"
+                            browser_dir = out_dir / "transcriptome_browser"
                             # Resolve GTF from config if present
                             gtf_cfg = _cfg_get(cfg, ["run", "gtf"], None)
                             gtf_path = _resolve(gtf_cfg, data_dir) if gtf_cfg else None
@@ -906,12 +923,14 @@ def collect(
                                 gtf=gtf_path if gtf_path else Path("."),
                                 bam=bam_for_browser,
                                 genome="",
-                                outdir=outdir,
+                                outdir=browser_dir,
                                 mapping=map_txt if map_txt.exists() else None,
                                 collapsed_isoforms=iso_bed if iso_bed.exists() else None,
                             )
                             region_str = f"{chrom}:{int(start_i)}-{int(end_i)}"
-                            transcriptome_browser.generate(cfg_obj, region=region_str)
+                            png_path = transcriptome_browser.generate(cfg_obj, region=region_str)
+                            if png_path:
+                                browser_paths[tag] = str(png_path)
                         else:
                             logging.warning(f"[TED] Skipping transcriptome browser plot for {tag}: dependency missing")
                 except Exception as e:
@@ -994,7 +1013,7 @@ def collect(
         rows.append(row)
 
     # write TSV
-    out_tsv = stage_dir / "TED.tsv"
+    out_tsv = out_dir / "TED.tsv"
     df = pd.DataFrame(rows)
     if is_regionalized:
         df.to_csv(out_tsv, sep="\t", index=False)
@@ -1013,7 +1032,7 @@ def collect(
     logging.info(f"[TED] Wrote TED.tsv with {len(rows)} rows at {out_tsv}")
 
     # Write audit TSV
-    audit_tsv = stage_dir / "TED.audit.tsv"
+    audit_tsv = out_dir / "TED.audit.tsv"
     pd.DataFrame(
         audit_rows,
         columns=["context","tag","label","path","exists","size_bytes","lines_est","derived_count","note"]
@@ -1028,5 +1047,10 @@ def collect(
         "assigned_primary_reads_total": assigned_total,
         "tsv": str(out_tsv),
     }
-    write_metrics(stage_dir, "TED", metrics)
+    write_metrics(out_dir, "TED", metrics)
     logging.info(f"[TED] Sidecar metrics written: {metrics}")
+
+    if browser_paths:
+        br_dir = out_dir / "transcriptome_browser"
+        br_dir.mkdir(parents=True, exist_ok=True)
+        (br_dir / "region_map.json").write_text(json.dumps(browser_paths, indent=2))

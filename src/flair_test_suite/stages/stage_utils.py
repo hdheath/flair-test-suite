@@ -245,16 +245,25 @@ def isoform_expected_outputs(run_id: str, first_tag: str | None, regionalized: b
 def run_ted_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
     try:
         from ..qc.ted import collect as ted_collect
+        import json
 
-        ted_collect(stage_dir, cfg, upstreams=upstreams)
-        browser_dir = stage_dir / "transcriptome_browser"
-        if not browser_dir.exists() or not any(browser_dir.glob("*.png")):
-            raise RuntimeError("browser plot missing")
-        return {"TED": {"tsv": str(stage_dir / "TED.tsv")}}
+        out_dir = stage_dir / "qc" / "ted"
+        ted_collect(stage_dir, cfg, upstreams=upstreams, out_dir=out_dir)
+
+        regionalized = any(stage_dir.glob("*_*_*.isoforms.bed"))
+        if regionalized:
+            map_json = out_dir / "transcriptome_browser" / "region_map.json"
+            if not map_json.exists():
+                raise RuntimeError("browser plot missing")
+            mapping = json.loads(map_json.read_text())
+            if not mapping or not all(Path(p).exists() for p in mapping.values()):
+                raise RuntimeError("browser plot missing")
+        tsv_path = out_dir / "TED.tsv"
+        return {"TED": {"tsv": str(tsv_path)}}
     except Exception as e:  # pragma: no cover - logging only
         logging.warning(f"[{stage_name}] TED QC failed: {e}")
         try:
-            (stage_dir / "TED.tsv").unlink()
+            (stage_dir / "qc" / "ted" / "TED.tsv").unlink()
         except FileNotFoundError:
             pass
         return {}
@@ -265,15 +274,16 @@ def run_sqanti_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
     try:
         from ..qc.sqanti import collect as sqanti_collect
 
-        sqanti_collect(stage_dir, cfg, upstreams=upstreams)
-        tsv = stage_dir / "sqanti_results.tsv"
+        out_dir = stage_dir / "qc" / "sqanti"
+        sqanti_collect(stage_dir, cfg, upstreams=upstreams, out_dir=out_dir)
+        tsv = out_dir / "sqanti_results.tsv"
         if not tsv.exists():
             raise RuntimeError("sqanti_results.tsv missing")
         return {"SQANTI": {"tsv": str(tsv)}}
     except Exception as e:  # pragma: no cover - logging only
         logging.warning(f"[{stage_name}] SQANTI QC failed: {e}")
         try:
-            (stage_dir / "sqanti_results.tsv").unlink()
+            (stage_dir / "qc" / "sqanti" / "sqanti_results.tsv").unlink()
         except FileNotFoundError:
             pass
         return {}

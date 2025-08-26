@@ -73,6 +73,7 @@ def _run_sqanti(
     prefix: str,
     env: str,
     cpus: int,
+    out_dir: Path,
     log_dir: Path,
 ) -> None:
     # Prefer invoking the package via `python -m` inside the conda env to avoid
@@ -95,7 +96,7 @@ def _run_sqanti(
     if sj:
         cmd.extend(["-c", str(sj)])
     # sqanti3_qc uses -t for number of threads (CPUs)
-    cmd.extend(["-o", prefix, "-d", str(gtf.parent), "--skipORF", "-t", str(cpus)])
+    cmd.extend(["-o", prefix, "-d", str(out_dir), "--skipORF", "-t", str(cpus)])
 
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "sqanti.log"
@@ -226,8 +227,18 @@ def _summarize(class_files: List[Path], out_tsv: Path) -> None:
 @register("sqanti")
 @register("collapse")
 @register("transcriptome")
-def collect(stage_dir: Path, cfg, upstreams=None) -> None:
-    """Run SQANTI QC on all ``*.isoforms.gtf`` under ``stage_dir``."""
+def collect(stage_dir: Path, cfg, upstreams=None, *, out_dir: Optional[Path] = None) -> None:
+    """Run SQANTI QC on all ``*.isoforms.gtf`` under ``stage_dir``.
+
+    Parameters
+    ----------
+    stage_dir : Path
+        Directory containing isoform GTFs.
+    cfg : object
+        Config object.
+    out_dir : Path | None
+        Directory to write SQANTI outputs. Defaults to ``stage_dir``.
+    """
     stage_name = stage_dir.parent.name
     qc_block = getattr(cfg, "qc", {}).get(stage_name, {}).get("SQANTI", {})
     env = qc_block.get("conda_env") if isinstance(qc_block, dict) else None
@@ -254,11 +265,13 @@ def collect(stage_dir: Path, cfg, upstreams=None) -> None:
         logger.warning("[SQANTI] no isoforms.gtf found under %s", stage_dir)
         return
 
-    logs_base = stage_dir / "logs" / "sqanti"
+    out_dir = out_dir or stage_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    logs_base = out_dir / "logs"
     class_files: List[Path] = []
     for gtf in gtfs:
         prefix = gtf.name.replace(".isoforms.gtf", "")
-        class_txt = gtf.with_name(f"{prefix}_classification.txt")
+        class_txt = out_dir / f"{prefix}_classification.txt"
         class_files.append(class_txt)
         if class_txt.exists():
             logger.info(f"[SQANTI] skipping SQANTI for {gtf.name}; classification present")
@@ -274,6 +287,7 @@ def collect(stage_dir: Path, cfg, upstreams=None) -> None:
                 prefix,
                 env,
                 cpus,
+                out_dir,
                 logs_base / prefix,
             )
         except Exception as e:
@@ -283,12 +297,12 @@ def collect(stage_dir: Path, cfg, upstreams=None) -> None:
     if not existing:
         logger.warning("[SQANTI] no classification files found; skipping summary")
         return
-    out_tsv = stage_dir / "sqanti_results.tsv"
+    out_tsv = out_dir / "sqanti_results.tsv"
     _summarize(existing, out_tsv)
     if plot_summary:
         try:  # pragma: no cover - plotting is heavy
-            plot_summary(str(out_tsv), stage_dir)
+            plot_summary(str(out_tsv), out_dir)
         except Exception as e:  # pragma: no cover - best effort
             logger.warning(f"[SQANTI] plot failed: {e}")
-    write_metrics(stage_dir, "SQANTI", {"tsv": str(out_tsv)})
+    write_metrics(out_dir, "SQANTI", {"tsv": str(out_tsv)})
     logger.info("[SQANTI] QC complete")

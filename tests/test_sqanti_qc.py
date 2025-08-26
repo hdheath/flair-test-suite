@@ -73,8 +73,9 @@ def test_sqanti_skips_missing_env(tmp_path: Path, monkeypatch):
     stage_dir.mkdir(parents=True)
     (stage_dir / 'sample.isoforms.gtf').write_text('')
     monkeypatch.setattr(sqanti, '_conda_env_exists', lambda env: False)
-    sqanti.collect(stage_dir, cfg)
-    assert not (stage_dir / 'sqanti_results.tsv').exists()
+    out_dir = stage_dir / 'qc' / 'sqanti'
+    sqanti.collect(stage_dir, cfg, out_dir=out_dir)
+    assert not (out_dir / 'sqanti_results.tsv').exists()
 
 
 def test_sqanti_summarizes_existing_classification(tmp_path: Path, monkeypatch):
@@ -83,13 +84,15 @@ def test_sqanti_summarizes_existing_classification(tmp_path: Path, monkeypatch):
     stage_dir.mkdir(parents=True)
     gtf = stage_dir / 'sample.isoforms.gtf'
     gtf.write_text('')
-    class_txt = stage_dir / 'sample_classification.txt'
+    out_dir = stage_dir / 'qc' / 'sqanti'
+    out_dir.mkdir(parents=True)
+    class_txt = out_dir / 'sample_classification.txt'
     _write_classification(class_txt)
     monkeypatch.setattr(sqanti, '_conda_env_exists', lambda env: True)
     monkeypatch.setattr(sqanti, '_run_sqanti', lambda *a, **k: (_ for _ in ()).throw(AssertionError('should not run')))
     monkeypatch.setattr(sqanti, 'plot_summary', lambda *a, **k: None)
-    sqanti.collect(stage_dir, cfg)
-    tsv = stage_dir / 'sqanti_results.tsv'
+    sqanti.collect(stage_dir, cfg, out_dir=out_dir)
+    tsv = out_dir / 'sqanti_results.tsv'
     assert tsv.exists()
     df = pd.read_csv(tsv, sep='\t')
     assert df.loc[0, 'sample'] == 'sample'

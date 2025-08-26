@@ -43,16 +43,22 @@ class Reinstate:
         primary_ok = primary.exists()
 
         if needs_qc and stage_name in {"collapse", "transcriptome"}:
-            ted_tsv = stage_dir / "TED.tsv"
+            ted_tsv = stage_dir / "qc" / "ted" / "TED.tsv"
             # Check for regionalized run by presence of region-tagged isoform beds
             is_regionalized = any(stage_dir.glob("*_*_*.isoforms.bed"))
             if is_regionalized:
-                browser_dir = stage_dir / "transcriptome_browser"
-                browser_png = None
-                if browser_dir.exists():
-                    browser_png = next(browser_dir.glob("*.png"), None)
-                qc_ok = ted_tsv.exists() and browser_png is not None
-                qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}, browser plot {'found' if browser_png else 'missing'}"
+                browser_dir = stage_dir / "qc" / "ted" / "transcriptome_browser"
+                region_map = browser_dir / "region_map.json"
+                if region_map.exists():
+                    try:
+                        mapping = json.loads(region_map.read_text())
+                        browser_ok = all(Path(p).exists() for p in mapping.values())
+                    except Exception:
+                        browser_ok = False
+                else:
+                    browser_ok = False
+                qc_ok = ted_tsv.exists() and browser_ok
+                qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}, browser plot {'found' if browser_ok else 'missing'}"
             else:
                 qc_ok = ted_tsv.exists()
                 qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}"
