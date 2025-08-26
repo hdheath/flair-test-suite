@@ -80,14 +80,15 @@ def test_collect_regionalized_resolves_peaks(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(ted, '_tss_tts_metrics_full', fake_metrics)
 
     reg_pb = PathBuilder(repo_root / 'outputs', run_id, 'regionalize', 'reg1')
-    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb})
+    out_dir = stage_dir / 'qc' / 'ted'
+    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb}, out_dir=out_dir)
 
     assert captured['prime5'] == reg_dir / f'{tag}_exp5.bed'
     assert captured['prime3'] == reg_dir / f'{tag}_exp3.bed'
     assert captured['ref_prime5'] == reg_dir / f'{tag}_ref5.bed'
     assert captured['ref_prime3'] == reg_dir / f'{tag}_ref3.bed'
 
-    df = pd.read_csv(stage_dir / 'TED.tsv', sep='\t')
+    df = pd.read_csv(out_dir / 'TED.tsv', sep='\t')
     assert df.loc[0, '5prime_precision'] == 0.1
     assert df.loc[0, '3prime_precision'] == 0.2
     assert df.loc[0, 'ref5prime_precision'] == 0.3
@@ -142,7 +143,8 @@ def test_collect_regionalized_uses_run_level_inputs(tmp_path: Path, monkeypatch)
     monkeypatch.setattr(ted, '_tss_tts_metrics_full', fake_metrics)
 
     reg_pb = PathBuilder(repo_root / 'outputs', run_id, 'regionalize', 'reg1')
-    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb})
+    out_dir = stage_dir / 'qc' / 'ted'
+    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb}, out_dir=out_dir)
 
     assert captured['prime5'] == reg_dir / f'{tag}_exp5.bed'
     assert captured['prime3'] == reg_dir / f'{tag}_exp3.bed'
@@ -199,7 +201,8 @@ def test_collect_regionalized_uses_stage_flags(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(ted, '_tss_tts_metrics_full', fake_metrics)
 
     reg_pb = PathBuilder(repo_root / 'outputs', run_id, 'regionalize', 'reg1')
-    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb})
+    out_dir = stage_dir / 'qc' / 'ted'
+    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb}, out_dir=out_dir)
 
     assert captured['prime5'] == reg_dir / f'{tag}_exp5.bed'
     assert captured['prime3'] == reg_dir / f'{tag}_exp3.bed'

@@ -154,8 +154,10 @@ A testing pipeline to:
 │               │       │       └── *.isoforms.bed
 │               │       │
 │               │       ├── collapse_qc/         # FLAIR collapse QC for this region across all runs 
-│               │       │   ├── sqanti_summary.tsv
-│               │       │   ├── sqanti.png
+│               │       │   ├── qc/
+│               │       │   │   └── sqanti/
+│               │       │       ├── sqanti_results.tsv
+│               │       │       └── sqanti.png
 │               │       │   ├── ted_summary.tsv
 │               │       │   ├── ted.png
 │               │       │   └── region_metrics.png

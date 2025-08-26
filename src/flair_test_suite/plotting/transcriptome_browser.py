@@ -188,8 +188,12 @@ def _parse_region(region: Optional[str]) -> Tuple[Optional[Tuple[str, int, int]]
     return (chrom, start_i, end_i), False
 
 
-def generate(cfg: Config, region: Optional[str] = None) -> None:
-    """Generate plot from configuration (reads + isoform bars only)."""
+def generate(cfg: Config, region: Optional[str] = None) -> Optional[Path]:
+    """Generate plot from configuration (reads + isoform bars only).
+
+    Returns the Path to the saved PNG on success, or ``None`` if the plot was
+    skipped (e.g., due to missing inputs).
+    """
     region_tuple, skip_plot = _parse_region(region)
     # If region string was supplied but couldn't be parsed, bail out
     if region and region_tuple is None:
@@ -532,13 +536,14 @@ def generate(cfg: Config, region: Optional[str] = None) -> None:
     # save
     if skip_plot:
         plt.close(fig)
-        return
+        return None
     out_png = outdir / f"{genome}_{contig}_{xmin}-{xmax}.png"
     fig.savefig(out_png, dpi=fig.dpi)
     plt.close(fig)
     width_px, height_px = int(fig_w * fig.dpi), int(fig_h * fig.dpi)
     print(f"Figure dimensions: {width_px} x {height_px} pixels")
     print(f"Saved: {out_png}")
+    return out_png
 
 
 def main():

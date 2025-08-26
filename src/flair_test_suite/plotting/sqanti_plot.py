@@ -84,10 +84,11 @@ def main():
         print(f"Plotting {tsv} → {plot_dir}")
         plot_summary(tsv, plot_dir)
     else:
-        pattern = os.path.join(args.outdir,'results','*','*','sqanti_results.tsv')
+        pattern = os.path.join(args.outdir,'results','*','*','qc','sqanti','sqanti_results.tsv')
         for tsv in sorted(glob.glob(pattern)):
-            region = os.path.basename(os.path.dirname(os.path.dirname(tsv)))
-            runn   = os.path.basename(os.path.dirname(tsv))
+            parts = os.path.normpath(tsv).split(os.sep)
+            region = parts[-5]
+            runn   = parts[-4]
             plot_dir = os.path.join(args.outdir,'plots',region,runn)
             print(f"Plotting {tsv} → {plot_dir}")
             plot_summary(tsv, plot_dir)
