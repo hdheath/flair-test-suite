@@ -154,6 +154,22 @@ unavailable.
 
 For more details, see the [FLAIR Test Suite Overview](./overview.md).
 
+## Optional SQANTI QC
+
+The collapse and transcriptome stages can run [SQANTI3](https://github.com/ConesaLab/SQANTI3)
+for additional isoform classification metrics.  Enable this by adding a
+`SQANTI` block under the corresponding stage in the `[qc]` section of your
+config.  If the specified Conda environment does not exist, SQANTI QC is
+skipped automatically.
+
+```toml
+[qc.collapse.SQANTI]
+conda_env = "sqanti"   # Conda env containing sqanti3_qc
+cpus = 8                # CPUs to pass to SQANTI3 (optional)
+```
+
+Use `[qc.transcriptome.SQANTI]` for transcriptome runs.
+
 ## Quantify stage manifest
 
 The `quantify` stage computes isoform and gene expression using a reads

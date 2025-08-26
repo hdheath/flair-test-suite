@@ -12,6 +12,7 @@ from .stage_utils import (
     build_flair_cmds,
     isoform_expected_outputs,
     run_ted_qc,
+    run_sqanti_qc,
 )
 
 # Ensure TED QC is registered for this stage even if QC package isn't imported elsewhere
@@ -130,6 +131,8 @@ class TranscriptomeStage(StageBase):
         )
 
     def _run_qc(self, stage_dir: Path, primary: Path, runtime: float | None) -> dict:
-        return run_ted_qc(self.name, stage_dir, self.cfg, self.upstreams)
+        ted = run_ted_qc(self.name, stage_dir, self.cfg, self.upstreams)
+        sqanti = run_sqanti_qc(self.name, stage_dir, self.cfg, self.upstreams)
+        return {**ted, **sqanti}
 
 
