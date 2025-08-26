@@ -33,12 +33,8 @@ import time
 from statistics import mean, median
 
 # Import utilities for QC: sidecar path, marker loading, registration, metrics write
-from ..lib.signature import qc_sidecar_path, load_marker
-
-import matplotlib
-matplotlib.use("Agg")  # headless backend for plotting
-import matplotlib.pyplot as plt  # noqa: E402
 import pysam  # noqa: E402
+from ..plotting.align_histograms import generate_histograms
 
 from . import register, write_metrics
 from .qc_utils import (
@@ -59,6 +55,7 @@ def collect(
     n_input_reads: int | None,
     genome_fa: str,
     runtime_sec: float | None = None,
+    read_count_method: str | None = None,
 ) -> dict:
     """
     Main QC collector for the 'align' stage.
@@ -70,6 +67,7 @@ def collect(
                       percentage is calculated
       genome_fa     : Reference FASTA used for motif counting
       runtime_sec   : Time taken by the align stage (seconds)
+      read_count_method : "exact" or "estimated" depending on counting strategy
 
     Returns:
       Dictionary of collected QC metrics.
@@ -121,27 +119,17 @@ def collect(
     # 4. Count unique splice junctions
     unique_juncs = count_unique_junctions(bed)
 
-    # 5. Plot histograms and save filenames
-    png_root = Path(out_dir)
-    png_root.mkdir(parents=True, exist_ok=True)
-
-    def _hist(vals, filename, xlabel):
-        """Generate and save a histogram; return filename or None if empty."""
-        if not vals:
-            return None
-        plt.figure()
-        plt.hist(vals, bins=50)
-        plt.xlabel(xlabel)
-        plt.ylabel("count")
-        plt.tight_layout()
-        outfile = png_root / filename
-        plt.savefig(outfile, dpi=150)
-        plt.close()
-        return outfile.name
-
-    mapq_png = _hist(mapq_vals, "align_mapq_hist.png", "MAPQ")
-    id_png = _hist([round(v*100,1) for v in identity_vals], "align_identity_hist.png", "Read identity (%)")
-    len_png = _hist(read_len_vals, "align_length_hist.png", "Read length (bp)")
+    # 5. Plot histograms and save filenames under <stage>/qc
+    qc_dir = Path(out_dir) / "qc"
+    mapping = generate_histograms(
+        mapq_vals,
+        [round(v * 100, 1) for v in identity_vals],
+        read_len_vals,
+        qc_dir,
+    )
+    mapq_png = mapping.get("mapq")
+    id_png = mapping.get("identity")
+    len_png = mapping.get("length")
 
     # 6. Count splice junction motifs (4-mer) and write JSON
     try:
@@ -154,12 +142,13 @@ def collect(
         motif_counts = {}
         print(f"Warning: Splice junction motif counting failed: {e}")
     motif_counts_str = {f"{k[0]}:{k[1]}": v for k, v in motif_counts.items()}
-    with open(Path(out_dir) / "splice_site_motifs.json", "w") as fh:
+    with open(qc_dir / "splice_site_motifs.json", "w") as fh:
         json.dump(motif_counts_str, fh, indent=2)
 
     # 7. Compile metrics and write outputs
     metrics = {
         "n_input_reads":      n_input_reads,
+        "read_count_method":  read_count_method or "unknown",
         "n_retained_bed":     retained,
         "mapped_pct":         mapped_pct,
         "mean_identity":      round(mean(identity_vals)*100, 2) if identity_vals else 0.0,
@@ -171,7 +160,7 @@ def collect(
         "qc_runtime_sec":     round(time.time() - qc_start, 2)
     }
     write_metrics(out_dir, "align", metrics)
-    with open(Path(out_dir) / "align_plot_manifest.json", "w") as fh:
+    with open(qc_dir / "align_plot_manifest.json", "w") as fh:
         json.dump({"mapq": mapq_png, "identity": id_png, "length": len_png}, fh, indent=2)
 
     return metrics

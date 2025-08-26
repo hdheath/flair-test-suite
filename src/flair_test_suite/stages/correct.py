@@ -59,6 +59,7 @@ class CorrectStage(StageBase):
 
         align_meta = self.upstreams["align"].metadata
         self._n_input_reads = align_meta.get("n_input_reads", align_meta.get("n_total_reads"))
+        self._read_count_method = align_meta.get("read_count_method", "exact")
 
         flair_version = str(cfg.run.version)
         major_version = int(flair_version.split(".")[0])
@@ -81,23 +82,18 @@ class CorrectStage(StageBase):
 
         return cmds
 
-    # Optional legacy shim if something still calls build_cmd()
-    def build_cmd(self) -> list[str]:
-        cmds = self.build_cmds()
-        return cmds[0] if cmds else []
-
     def expected_outputs(self) -> dict[str, Path]:
         # Pick a concrete primary: first region tag if present else run_id
         first_tag = (self._bed_files[0][1] if getattr(self, "_bed_files", []) else self.run_id)
         outputs = {
             "corrected":   Path(f"{first_tag}_all_corrected.bed"),
             "inconsistent": Path(f"{first_tag}_all_inconsistent.bed"),
-            "qc_sidecar":  Path("correct_qc.tsv"),
+            "qc_sidecar":  Path("qc/correct_qc.tsv"),
         }
         # Optional per-region QC files (not used for reinstate, just helpful)
         if getattr(self, "_bed_files", []) and "regionalize" in self.upstreams:
             for _, tag in self._bed_files:
-                outputs[f"{tag}_qc"] = Path(tag) / "correct_qc.tsv"
+                outputs[f"{tag}_qc"] = Path("qc") / tag / "correct_qc.tsv"
         return outputs
 
     # -------- QC orchestration (stage-specific) --------
@@ -117,12 +113,14 @@ class CorrectStage(StageBase):
             genome_fa=self._genome_fa_abs,
             runtime_sec=runtime,
             is_regionalized=is_regionalized,
+            read_count_method=(None if is_regionalized else self._read_count_method),
         )
 
-        # Aggregate sidecar (so Reinstate sees QC complete)
+        # Aggregate sidecar only for regionalized runs (per-region metrics already written)
         total_qc_time = sum((m or {}).get("qc_runtime_sec", 0) for m in qc_metrics.values())
-        write_metrics(stage_dir, "correct", {
-            "regions": len(self._bed_files),
-            "qc_runtime_sec": round(total_qc_time, 2),
-        })
+        if is_regionalized:
+            write_metrics(stage_dir, "correct", {
+                "regions": len(self._bed_files),
+                "qc_runtime_sec": round(total_qc_time, 2),
+            })
         return qc_metrics

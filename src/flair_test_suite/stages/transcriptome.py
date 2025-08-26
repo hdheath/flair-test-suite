@@ -113,10 +113,6 @@ class TranscriptomeStage(StageBase):
         return cmds
 
     # Legacy shim
-    def build_cmd(self) -> list[str]:
-        cmds = self.build_cmds()
-        return cmds[-1] if cmds else []
-
     # ───────────────────── expected outputs ─────────────────────
     def expected_outputs(self) -> dict[str, Path]:
         """

@@ -30,7 +30,7 @@ class StageBase(ABC):
     Abstract base for pipeline stages.
 
     Subclasses must implement:
-      • build_cmds() (preferred) OR build_cmd() (legacy)
+      • build_cmds()
       • expected_outputs()
 
     During build_cmd(s), subclasses should populate:
@@ -61,14 +61,9 @@ class StageBase(ABC):
     # ─────────────────────────────── Required API ───────────────────────────────
 
     @abstractmethod
-    def build_cmd(self) -> List[str] | str:
-        """Legacy single-command builder. Prefer build_cmds()."""
+    def build_cmds(self) -> List[List[str]] | List[str] | str:
+        """Return command list(s) for the stage."""
         ...
-
-    @abstractmethod
-    def build_cmds(self) -> List[List[str]] | None:
-        """Return a list of commands, or None to fallback to build_cmd()."""
-        return None
 
     @abstractmethod
     def expected_outputs(self) -> Dict[str, Path]:
@@ -236,11 +231,14 @@ class StageBase(ABC):
     # ─────────────────────────────── Internal helpers ───────────────────────────
 
     def _build_and_normalize_cmds(self) -> List[List[str]]:
-        """Unify command building with legacy fallback and string splitting."""
+        """Normalize build_cmds() output into a list of command lists."""
         raw_cmds = self.build_cmds()
         if raw_cmds is None:
-            built = self.build_cmd()
-            raw_cmds = [built] if isinstance(built, (list, str)) else []
+            raw_cmds = []
+        elif isinstance(raw_cmds, str):
+            raw_cmds = [shlex.split(raw_cmds)]
+        elif raw_cmds and isinstance(raw_cmds[0], (str, Path)):
+            raw_cmds = [list(raw_cmds)]
         return [c if isinstance(c, list) else shlex.split(c) for c in raw_cmds]
 
     def _prepare_signature(self) -> None:
@@ -298,25 +296,19 @@ class StageBase(ABC):
         try:
             genome_fa = getattr(self, "_genome_fa_abs", None)
             kwargs = {
-                "primary": primary,
                 "out_dir": stage_dir,
                 "n_input_reads": getattr(self, "_n_input_reads", None),
                 "runtime_sec": runtime,
             }
+            if hasattr(self, "_read_count_method"):
+                kwargs["read_count_method"] = getattr(self, "_read_count_method")
             if self.name == "align":
                 return qc_func(
                     primary,
-                    out_dir=stage_dir,
-                    n_input_reads=kwargs["n_input_reads"],
                     genome_fa=genome_fa,
-                    runtime_sec=runtime,
+                    **kwargs,
                 )
-            return qc_func(
-                primary,
-                out_dir=stage_dir,
-                n_input_reads=kwargs["n_input_reads"],
-                runtime_sec=runtime,
-            )
+            return qc_func(primary, **kwargs)
         except Exception as e:
             logging.info(f"QC for '{self.name}' failed: {e}")
             return {}
@@ -343,6 +335,8 @@ class StageBase(ABC):
         }
         if hasattr(self, "_n_input_reads"):
             meta["n_input_reads"] = self._n_input_reads
+        if hasattr(self, "_read_count_method"):
+            meta["read_count_method"] = self._read_count_method
         return meta
 
     @staticmethod

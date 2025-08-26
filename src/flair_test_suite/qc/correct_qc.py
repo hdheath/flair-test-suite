@@ -1,9 +1,9 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Dict
-import time, json, logging
+import time, json, logging, csv
 
-from . import register, write_metrics
+from . import register
 from .qc_utils import (
     count_lines,
     percent,
@@ -34,6 +34,7 @@ def collect(
     genome_fa: str,
     runtime_sec: float | None = None,
     regionalized: bool = False,
+    read_count_method: str | None = None,
 ) -> Dict:
     """
     Regionalized=True  -> NO align comparison. Only 'after' motifs from the corrected BED.
@@ -45,7 +46,6 @@ def collect(
     # Always skip empties early
     if bed_is_empty(bed):
         metrics = {"skipped_empty_bed": True, "n_corrected_reads": 0, "qc_runtime_sec": 0.0}
-        write_metrics(out_dir, "correct", metrics)
         return metrics
 
     # ────────────── Regionalized: after-only, no align usage ──────────────
@@ -69,7 +69,6 @@ def collect(
             "n_corrected_reads": count_lines(bed),
             "qc_runtime_sec": round(time.time() - t0, 2),
         }
-        write_metrics(out_dir, "correct", metrics)
         return metrics
 
     # ────────────── Non-regionalized: full QC vs align ──────────────
@@ -83,10 +82,12 @@ def collect(
     if n_input_reads is None:
         n_removed = None
         removed_pct = None
+        removed_pct_method = None
         logging.warning("[correct-qc] n_input_reads is None for non-regionalized run; removal % omitted.")
     else:
         n_removed = n_input_reads - n_corr
         removed_pct = percent(n_removed, n_input_reads)
+        removed_pct_method = read_count_method or "exact"
 
     # 2) unique junctions after
     try:
@@ -110,7 +111,7 @@ def collect(
                     k, v = line.rstrip("\n").split("\t")
                     if k == "unique_junctions":
                         uniq_before = int(v); break
-        motif_json_path = align_stage_dir / "splice_site_motifs.json"
+        motif_json_path = align_stage_dir / "qc" / "splice_site_motifs.json"
         if motif_json_path.exists():
             with open(motif_json_path) as fh:
                 motifs_before = json.load(fh)
@@ -140,12 +141,12 @@ def collect(
         "n_corrected_reads": n_corr,
         "n_removed_reads": n_removed,
         "removed_pct": removed_pct,
+        "removed_pct_method": removed_pct_method,
         "unique_junc_before": uniq_before,
         "unique_junc_after": uniq_after,
         "correct_runtime_sec": round(runtime_sec, 2) if runtime_sec is not None else None,
         "qc_runtime_sec": round(time.time() - t0, 2),
     }
-    write_metrics(out_dir, "correct", metrics)
     return metrics
 
 
@@ -157,6 +158,7 @@ def run_qc(
     genome_fa: str,
     runtime_sec: float | None,
     is_regionalized: bool,
+    read_count_method: str | None,
 ) -> dict:
     """
     Iterate regions, call collect() with explicit 'regionalized' flag.
@@ -171,13 +173,13 @@ def run_qc(
         corrected_bed = stage_dir / f"{region_tag}_all_corrected.bed"
 
         # Choose QC output directory
-        region_qc_dir = (stage_dir / region_tag) if is_regionalized else stage_dir
+        region_qc_dir = (stage_dir / "qc" / region_tag) if is_regionalized else (stage_dir / "qc")
         region_qc_dir.mkdir(parents=True, exist_ok=True)
 
         # Skip if corrected bed missing/empty (still emit a minimal TSV)
         if bed_is_empty(corrected_bed):
             metrics = {"skipped_empty_bed": True, "n_corrected_reads": 0, "qc_runtime_sec": 0.0}
-            write_metrics(region_qc_dir, "correct", metrics)
+            _write_region_metrics(region_qc_dir, metrics)
             qc_metrics[region_tag] = metrics
             logging.info(f"[correct-qc] Skipped: missing/empty corrected BED for {region_tag}: {corrected_bed}")
             continue
@@ -191,9 +193,21 @@ def run_qc(
                 genome_fa=genome_fa,
                 runtime_sec=runtime_sec,
                 regionalized=is_regionalized,
+                read_count_method=(None if is_regionalized else read_count_method),
             )
+            _write_region_metrics(region_qc_dir, metrics)
             qc_metrics[region_tag] = metrics
         except Exception as e:
             logging.error(f"[correct-qc] QC failed for {region_tag}: {e}")
 
     return qc_metrics
+
+
+def _write_region_metrics(out_dir: Path, metrics: Dict) -> None:
+    """Write per-region metrics to out_dir/correct_qc.tsv."""
+    out_f = out_dir / "correct_qc.tsv"
+    with open(out_f, "w", newline="") as fh:
+        w = csv.writer(fh, delimiter="\t")
+        w.writerow(["metric", "value"])
+        for k, v in metrics.items():
+            w.writerow([k, v])

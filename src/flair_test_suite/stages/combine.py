@@ -50,7 +50,7 @@ class CombineStage(StageBase):
     def tool_version(self) -> str:  # pragma: no cover - simple accessor
         return str(self.cfg.run.version)
 
-    def build_cmd(self) -> List[str]:
+    def build_cmds(self) -> List[List[str]]:
         cfg = self.cfg
         stage_cfg = get_stage_config(cfg, self.name)
         raw_flags = dict(getattr(stage_cfg, "flags", {}) or {})
@@ -125,10 +125,7 @@ class CombineStage(StageBase):
 
         cmd = ["flair", "combine", "--manifest", self._manifest_rel, "-o", self.run_id]
         cmd.extend(flag_parts)
-        return cmd
-
-    def build_cmds(self) -> List[List[str]] | None:  # pragma: no cover - single command
-        return None
+        return [cmd]
 
     def expected_outputs(self) -> dict[str, Path]:
         # FLAIR combine produces several artifacts: a merged BED, counts TSV,

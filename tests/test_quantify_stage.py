@@ -54,7 +54,7 @@ def test_quantify_uses_manifest_and_cmd(tmp_path, monkeypatch):
         cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb}
     )
 
-    cmd = stage.build_cmd()
+    cmd = stage.build_cmds()[0]
     assert cmd[:3] == ["flair", "quantify", "-r"]
     assert Path(cmd[3]).name == "reads_manifest.tsv"
     assert "-i" in cmd and str(iso_fa) in cmd

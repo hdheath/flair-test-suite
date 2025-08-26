@@ -20,7 +20,7 @@ def test_qc_registry_has_expected_collectors():
 def test_write_metrics_creates_tsv(tmp_path: Path):
     metrics = {"one": 1, "two": "dos"}
     qc.write_metrics(tmp_path, "dummy", metrics)
-    out = tmp_path / "dummy_qc.tsv"
+    out = tmp_path / "qc" / "dummy_qc.tsv"
     assert out.exists()
     lines = out.read_text().splitlines()
     assert lines[0] == "metric\tvalue"

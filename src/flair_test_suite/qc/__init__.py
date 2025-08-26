@@ -47,6 +47,7 @@ def write_metrics(stage_dir: Path, stage_name: str, metrics: dict):
       ...
     """
     out_f = qc_sidecar_path(stage_dir, stage_name)
+    out_f.parent.mkdir(parents=True, exist_ok=True)
     with open(out_f, "w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t")
         w.writerow(["metric", "value"])

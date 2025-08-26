@@ -94,10 +94,6 @@ class CollapseStage(StageBase):
         logging.debug(f"[collapse] mode={mode} commands={len(cmds)}")
         return cmds
 
-    def build_cmd(self) -> list[str]:
-        cmds = self.build_cmds()
-        return cmds[-1] if cmds else []
-
     def expected_outputs(self) -> dict[str, Path]:
         """
         Provide a CONCRETE primary so Reinstate can test existence.

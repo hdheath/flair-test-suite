@@ -60,7 +60,7 @@ def test_combine_writes_manifest_and_builds_cmd(tmp_path, monkeypatch):
         cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb}
     )
 
-    cmd = stage.build_cmd()
+    cmd = stage.build_cmds()[0]
     assert cmd[:3] == ["flair", "combine", "--manifest"]
     assert cmd[3] == "manifest.tsv"
     assert cmd[4:6] == ["-o", "run1"]
@@ -118,7 +118,7 @@ def test_combine_defaults_to_collapse_output(tmp_path, monkeypatch):
 
     stage = CombineStage(cfg, run_id="run1", work_dir=repo_root / "outputs", upstreams={"collapse": collapse_pb})
 
-    cmd = stage.build_cmd()
+    cmd = stage.build_cmds()[0]
     assert cmd[:3] == ["flair", "combine", "--manifest"]
     assert cmd[3] == "manifest.tsv"
     assert cmd[4:6] == ["-o", "run1"]

@@ -345,59 +345,32 @@ def _synthesize_mapping_from_map_and_bam(
     return out_p
 
 
-def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, Optional[str]], int]:
+def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, str], int]:
     """Collect peak file configuration for a stage.
 
-    Peak BED paths may be specified under ``[qc.<stage>.TED]``, via shared
-    run-level inputs, or as flags in ``[run.stages.<stage>.flags]`` for backward
-    compatibility.  This helper merges the sources in that precedence order and
-    returns both the resolved mapping and the window size.
+    TSS/TTS peak BED files are now sourced exclusively from the shared
+    run-level inputs.  ``experiment_*`` and ``reference_*`` keys are required
+    under ``[run]`` and no longer honored from ``[qc.<stage>.TED]`` blocks or
+    per-stage flags.  ``window`` may still be overridden under the QC block.
     """
 
     qc_block = _cfg_get(cfg, ["qc", stage_name, "TED"], {}) or {}
     window = int(qc_block.get("window", 50))
+
+    run_cfg = getattr(cfg, "run", None)
     peaks_cfg = {
-        "prime5": qc_block.get("experiment_5_prime_regions_bed_file"),
-        "prime3": qc_block.get("experiment_3_prime_regions_bed_file"),
-        "ref_prime5": qc_block.get("reference_5_prime_regions_bed_file"),
-        "ref_prime3": qc_block.get("reference_3_prime_regions_bed_file"),
+        "prime5": getattr(run_cfg, "experiment_5_prime_regions_bed_file", None) if run_cfg else None,
+        "prime3": getattr(run_cfg, "experiment_3_prime_regions_bed_file", None) if run_cfg else None,
+        "ref_prime5": getattr(run_cfg, "reference_5_prime_regions_bed_file", None) if run_cfg else None,
+        "ref_prime3": getattr(run_cfg, "reference_3_prime_regions_bed_file", None) if run_cfg else None,
     }
 
-    # Run-level shared inputs
-    run_cfg = getattr(cfg, "run", None)
-    if run_cfg:
-        run_map = {
-            "prime5": getattr(run_cfg, "experiment_5_prime_regions_bed_file", None),
-            "prime3": getattr(run_cfg, "experiment_3_prime_regions_bed_file", None),
-            "ref_prime5": getattr(run_cfg, "reference_5_prime_regions_bed_file", None),
-            "ref_prime3": getattr(run_cfg, "reference_3_prime_regions_bed_file", None),
-        }
-        for key, val in run_map.items():
-            if not peaks_cfg[key] and val:
-                peaks_cfg[key] = val
-
-    if not all(peaks_cfg.values()):
-        stage_flags: Dict[str, Optional[str]] = {}
-        stages = _cfg_get(cfg, ["run", "stages"], []) or []
-        if isinstance(stages, list):
-            for st in stages:
-                name = getattr(st, "name", None) if not isinstance(st, dict) else st.get("name")
-                if name == stage_name:
-                    sf = getattr(st, "flags", {}) if not isinstance(st, dict) else st.get("flags", {})
-                    stage_flags = dict(sf or {})
-                    break
-        elif isinstance(stages, dict):
-            stage_flags = dict(stages.get(stage_name, {}).get("flags", {}))
-
-        mapping = {
-            "prime5": "experiment_5_prime_regions_bed_file",
-            "prime3": "experiment_3_prime_regions_bed_file",
-            "ref_prime5": "reference_5_prime_regions_bed_file",
-            "ref_prime3": "reference_3_prime_regions_bed_file",
-        }
-        for key, config_key in mapping.items():
-            if not peaks_cfg[key]:
-                peaks_cfg[key] = stage_flags.get(config_key)
+    missing = [k for k, v in peaks_cfg.items() if not v]
+    if missing:
+        raise RuntimeError(
+            "TSS/TTS peak BED files must be provided under [run]; missing: "
+            + ", ".join(missing)
+        )
 
     return peaks_cfg, window
 
@@ -781,29 +754,9 @@ def collect(
                 reg_tx_cnt = None
             reg_bam = (reg_dir_for_tag / f"{tag}.bam") if reg_dir_for_tag else None
 
-            # peaks: prefer sliced if available
+            # peaks: prefer sliced if available, otherwise global run-level path
             peaks = {}
-            # If config is missing, use default suffixes and look for files in reg_dir_for_tag
-            default_suffixes = {
-                "prime5": "CAGE_TSS_human.bed",
-                "prime3": "WTC11_all_polyApeaks_fixed.bed",
-                "ref_prime5": "human_ref_TSS.bed",
-                "ref_prime3": "human_ref_TTS.bed"
-            }
-            for key in ["prime5", "prime3", "ref_prime5", "ref_prime3"]:
-                conf = peaks_cfg.get(key)
-                if not conf:
-                    # Try default suffix
-                    base = default_suffixes[key]
-                    sliced = (reg_dir_for_tag / f"{tag}_{base}") if reg_dir_for_tag else None
-                    print(f"[TED] (fallback) Looking for sliced peak file for key '{key}': {sliced}")
-                    if sliced and sliced.exists() and sliced.stat().st_size > 0:
-                        print(f"[TED] (fallback) Found sliced peak file for key '{key}': {sliced}")
-                        peaks[key] = sliced
-                    else:
-                        print(f"[TED] (fallback) No config and no sliced peak file for key '{key}' in {reg_dir_for_tag}")
-                        peaks[key] = None
-                    continue
+            for key, conf in peaks_cfg.items():
                 base = Path(conf).name
                 sliced = (reg_dir_for_tag / f"{tag}_{base}") if reg_dir_for_tag else None
                 print(f"[TED] Looking for sliced peak file for key '{key}': {sliced}")
@@ -815,9 +768,10 @@ def collect(
                     print(f"[TED] Looking for global peak file for key '{key}': {rp}")
                     if not (rp and rp.exists() and rp.stat().st_size > 0):
                         print(f"[TED] Peaks file for key '{key}' and region {tag} not found: {conf}")
+                        peaks[key] = None
                     else:
                         print(f"[TED] Found global peak file for key '{key}': {rp}")
-                    peaks[key] = rp if (rp and rp.exists() and rp.stat().st_size > 0) else None
+                        peaks[key] = rp
 
             logging.debug(f"[TED] For region {tag}, resolved peaks: { {k: str(v) if v else None for k,v in peaks.items()} }")
 
