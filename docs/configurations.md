@@ -81,6 +81,10 @@ experiment_3_prime_regions_bed_file = ""                          # optional
 reference_5_prime_regions_bed_file  = ""                          # optional
 reference_3_prime_regions_bed_file  = ""                          # optional
 
+# The four *regions_bed_file fields above must be specified here under the
+# shared run-level inputs.  Stage flags and QC blocks are no longer consulted
+# for these peak files.
+
 # ------------------------------------------------------------------------------------------------------------
 # -------- ALIGN ------------------------------------------------------
 # ------------------------------------------------------------------------------------------------------------

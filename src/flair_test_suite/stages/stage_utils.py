@@ -31,9 +31,50 @@ def count_reads(fp: Path) -> int:
             # FASTQ: total lines divided by four
             return sum(1 for _ in fh) // 4
         # Fallback: guess from filename if the first char was unexpected
-        if fp.name.lower().endswith(('.fa', '.fasta', '.fa.gz', '.fasta.gz')):
+        if fp.name.lower().endswith((".fa", ".fasta", ".fa.gz", ".fasta.gz")):
             return sum(1 for ln in fh if ln.startswith(">"))
         return sum(1 for _ in fh) // 4
+
+
+def estimate_read_count(fp: Path, max_reads: int = 50_000) -> Tuple[int, bool]:
+    """Estimate total reads by sampling up to ``max_reads`` records.
+
+    Returns a tuple of (count, is_exact) where ``is_exact`` is True when the
+    file ended before the sample limit.
+    """
+
+    opener = gzip.open if fp.suffix == ".gz" else open
+    total_size = fp.stat().st_size
+    with opener(fp, "rt") as fh:
+        first = fh.read(1)
+        fh.seek(0)
+        is_fasta = first == ">" or fp.name.lower().endswith((".fa", ".fasta", ".fa.gz", ".fasta.gz"))
+        count = 0
+        if is_fasta:
+            for line in fh:
+                if line.startswith(">"):
+                    count += 1
+                    if count >= max_reads:
+                        break
+        else:
+            while True:
+                header = fh.readline()
+                if not header:
+                    break
+                fh.readline(); fh.readline(); fh.readline()
+                count += 1
+                if count >= max_reads:
+                    break
+
+        # Determine compressed bytes consumed
+        consumed = fh.fileobj.tell() if hasattr(fh, "fileobj") else fh.tell()
+        eof = fh.readline() == ""  # check if already at EOF
+
+    if count < max_reads and eof:
+        return count, True
+    # extrapolate
+    est = int(count * total_size / consumed) if consumed else 0
+    return est, False
 
 
 def resolve_path(raw: str | Path, *, data_dir: Path) -> Path:

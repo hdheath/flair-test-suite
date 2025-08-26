@@ -60,7 +60,7 @@ class QuantifyStage(StageBase):
         raise RuntimeError("[quantify] isoform FASTA not found in upstream outputs")
 
     # ------------------------------------------------------------------
-    def build_cmd(self) -> List[str]:
+    def build_cmds(self) -> List[List[str]]:
         cfg = self.cfg
         stage_cfg = get_stage_config(cfg, self.name)
         raw_flags = dict(getattr(stage_cfg, "flags", {}) or {})
@@ -119,10 +119,7 @@ class QuantifyStage(StageBase):
             self.run_id,
         ]
         cmd.extend(flag_parts)
-        return cmd
-
-    def build_cmds(self) -> List[List[str]] | None:  # pragma: no cover - single command
-        return None
+        return [cmd]
 
     # ------------------------------------------------------------------
     def expected_outputs(self) -> dict[str, Path]:

@@ -97,7 +97,7 @@ class RegionalizeStage(StageBase):
             except Exception:
                 self._genome_fa_abs = None
 
-        # Optional inputs (slice per region)
+        # Optional inputs (slice per region) sourced solely from run-level config
         opt_keys = [
             "junctions",  # STAR SJ.out.tab
             "experiment_5_prime_regions_bed_file",
@@ -107,7 +107,7 @@ class RegionalizeStage(StageBase):
         ]
         self._optional: Dict[str, Path] = {}
         for k in opt_keys:
-            v = getattr(cfg.run, k, None) or flags.get(k)
+            v = getattr(cfg.run, k, None)
             if v:
                 p = resolve_path(v, data_dir=data_dir)
                 self._optional[k] = p
@@ -212,10 +212,6 @@ class RegionalizeStage(StageBase):
 
 
     # for legacy callers
-    def build_cmd(self) -> List[str]:
-        cmds = self.build_cmds()
-        return cmds[0] if cmds else []
-
     def expected_outputs(self) -> dict[str, Path]:
         return {
             "region_bam": Path("{chrom}_{start}_{end}.bam"),

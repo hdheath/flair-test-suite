@@ -72,9 +72,14 @@ def qc_sidecar_path(stage_dir: Path, stage_name: str) -> Path:
       - stage_name: name of the stage (used as filename prefix)
 
     Returns:
-      - <stage_dir>/<stage_name>_qc.tsv
+      - <stage_dir>/qc/<stage_name>_qc.tsv for single-QC stages
+      - <stage_dir>/qc/<stage_name>/<stage_name>_qc.tsv for multi-QC tools
+        such as TED or SQANTI.
     """
-    return stage_dir / f"{stage_name}_qc.tsv"
+    stage = stage_name.lower()
+    if stage in {"ted", "sqanti"}:
+        return stage_dir / "qc" / stage / f"{stage_name}_qc.tsv"
+    return stage_dir / "qc" / f"{stage_name}_qc.tsv"
 
 
 def load_marker(stage_dir: Path) -> dict | None:
@@ -126,13 +131,13 @@ def is_complete(
 
     # 3) If QC is required, ensure TSV and QC block are present
     if needs_qc:
-        qc_tsv = stage_dir / f"{stage_dir.name}_qc.tsv"
+        qc_tsv = qc_sidecar_path(stage_dir, stage_dir.name)
         if not qc_tsv.exists():
             print(f"[DEBUG] QC TSV missing: {qc_tsv}")
             return False
         # Load marker JSON and verify 'qc' key has content
         try:
-            marker_json = json.loads(marker.read_text())
+            marker_json = load_marker(stage_dir)
             print(f"[DEBUG] Loaded marker JSON: {marker_json} (type: {type(marker_json)})")
         except Exception as e:
             print(f"[DEBUG] Error loading marker JSON: {e}")
