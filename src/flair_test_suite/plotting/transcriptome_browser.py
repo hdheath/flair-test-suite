@@ -415,7 +415,6 @@ def generate(cfg: Config, region: Optional[str] = None) -> Optional[Path]:
             add_blocks(t, blks)
             occupancy.append(t)
             row_assign[idx] = len(occupancy) - 1
-            logging.warning(f"Unassigned read at row {row_assign[idx]}")
 
     # Flip rows so stacks are at top
     tot = len(occupancy)
