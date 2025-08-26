@@ -63,6 +63,13 @@ flair-test-suite path/to/your_config.toml
 
 This will execute the workflow defined in `your_config.toml` and place results under `outputs/<run_id>/`.
 
+By default the run summary logs paths relative to the working directory. Use
+`--absolute-paths` if you prefer full paths:
+
+```bash
+flair-test-suite --absolute-paths path/to/your_config.toml
+```
+
 ### Batch runs from a list of configs
 
 If you have many configs, create a text file listing each TOML path (one per line):
