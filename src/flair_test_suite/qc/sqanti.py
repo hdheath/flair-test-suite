@@ -75,12 +75,15 @@ def _run_sqanti(
     cpus: int,
     log_dir: Path,
 ) -> None:
+    # Prefer invoking the package via `python -m` inside the conda env to avoid
+    # relying on an installed entrypoint script. If that fails with command not
+    # found, fall back to running the entrypoint through a shell.
     cmd = [
         "conda",
         "run",
         "-n",
         env,
-        "sqanti3_qc",
+        "sqanti3_qc.py",
         str(gtf),
         str(ref_gtf),
         str(ref_fa),
@@ -91,11 +94,45 @@ def _run_sqanti(
         cmd.extend(["--polyA_peak", str(prime3)])
     if sj:
         cmd.extend(["-c", str(sj)])
-    cmd.extend(["-o", prefix, "-d", str(gtf.parent), "--skipORF", "--cpus", str(cpus)])
+    # sqanti3_qc uses -t for number of threads (CPUs)
+    cmd.extend(["-o", prefix, "-d", str(gtf.parent), "--skipORF", "-t", str(cpus)])
 
     log_dir.mkdir(parents=True, exist_ok=True)
-    with open(log_dir / "sqanti.log", "w") as lf:
-        subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, check=True)
+    log_path = log_dir / "sqanti.log"
+    # run and capture output; if returncode indicates command not found (127),
+    # try a shell fallback. Surface helpful log excerpt on failure.
+    try:
+        with open(log_path, "w") as lf:
+            subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, check=True)
+    except subprocess.CalledProcessError as e:
+        # If the python -m invocation failed with code 127, try a shell entrypoint
+        if e.returncode == 127:
+            logger.warning(f"[SQANTI] python -m invocation failed (rc=127); attempting shell fallback for env '{env}'")
+            shell_cmd = (
+                "conda run -n " + env + " bash -lc 'sqanti3_qc.py "
+                + "\"" + str(gtf) + "\" "
+                + "\"" + str(ref_gtf) + "\" "
+                + "\"" + str(ref_fa) + "\""
+            )
+            if sj:
+                shell_cmd += " -c \"%s\"" % str(sj)
+            shell_cmd += " -o \"%s\" -d \"%s\" --skipORF -t %s'" % (prefix, str(gtf.parent), str(cpus))
+            try:
+                with open(log_path, "a") as lf:
+                    subprocess.run(shell_cmd, stdout=lf, stderr=subprocess.STDOUT, shell=True, check=True)
+                return
+            except subprocess.CalledProcessError:
+                logger.warning(f"[SQANTI] shell fallback also failed for env '{env}'")
+        # For any failure, include a short excerpt of the log to help debugging
+        try:
+            with open(log_path, "r") as lf:
+                lines = lf.readlines()[-200:]
+                excerpt = "".join(lines[-50:]) if lines else "(no log content)"
+        except Exception:
+            excerpt = "(could not read sqanti.log)"
+        logger.warning(f"[SQANTI] sqanti3_qc failed for {prefix}: {e}; log excerpt:\n{excerpt}")
+        # Re-raise so callers can still observe the failure if desired
+        raise
 
 
 def _normalize(lbl: str) -> str:
@@ -205,8 +242,8 @@ def collect(stage_dir: Path, cfg, upstreams=None) -> None:
     data_dir = Path(cfg.run.data_dir)
     ref_gtf = stage_utils.resolve_path(cfg.run.gtf, data_dir=data_dir)
     ref_fa = stage_utils.resolve_path(cfg.run.genome_fa, data_dir=data_dir)
-    prime5 = getattr(cfg.run, "reference_5_prime_regions_bed_file", None)
-    prime3 = getattr(cfg.run, "reference_3_prime_regions_bed_file", None)
+    prime5 = getattr(cfg.run, "experiment_5_prime_regions_bed_file", None)
+    prime3 = getattr(cfg.run, "experiment_3_prime_regions_bed_file", None)
     sj = getattr(cfg.run, "junctions", None)
     prime5 = stage_utils.resolve_path(prime5, data_dir=data_dir) if prime5 else None
     prime3 = stage_utils.resolve_path(prime3, data_dir=data_dir) if prime3 else None

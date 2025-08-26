@@ -22,14 +22,23 @@ SRC  = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-def plot_summary(summary_tsv, plot_dir):
-    out_png = os.path.join(plot_dir, 'sqanti.png')
+def plot_summary(summary_tsv_or_df, plot_dir):
+    """Plot a summary from a TSV filepath or a pandas.DataFrame.
+
+    summary_tsv_or_df may be either a string path to a TSV (tab-separated)
+    or a pandas.DataFrame already in memory (useful for piping results
+    from another script).
+    """
+    out_png = os.path.join(plot_dir, "sqanti.png")
     if os.path.exists(out_png):
         print(f"[SKIP] plot already exists: {out_png}")
         return
 
     os.makedirs(plot_dir, exist_ok=True)
-    df = pd.read_csv(summary_tsv, sep='\t')
+    if isinstance(summary_tsv_or_df, pd.DataFrame):
+        df = summary_tsv_or_df
+    else:
+        df = pd.read_csv(summary_tsv_or_df, sep='\t')
     samples = df['sample'].tolist()
     x       = range(len(df))
 
@@ -62,15 +71,26 @@ def plot_summary(summary_tsv, plot_dir):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('-o','--outdir', required=True)
+    p.add_argument('-s', '--summary', default=None,
+                   help='Optional path to a single summary TSV to plot (skips glob).')
     args = p.parse_args()
 
-    pattern = os.path.join(args.outdir,'results','*','*','sqanti_results.tsv')
-    for tsv in sorted(glob.glob(pattern)):
-        region = os.path.basename(os.path.dirname(os.path.dirname(tsv)))
-        runn   = os.path.basename(os.path.dirname(tsv))
-        plot_dir = os.path.join(args.outdir,'plots',region,runn)
+    if args.summary:
+        # User provided a single summary TSV to plot
+        tsv = args.summary
+        # derive a reasonable plot directory under outdir/plots/<basename>
+        base = os.path.splitext(os.path.basename(tsv))[0]
+        plot_dir = os.path.join(args.outdir, 'plots', base)
         print(f"Plotting {tsv} → {plot_dir}")
         plot_summary(tsv, plot_dir)
+    else:
+        pattern = os.path.join(args.outdir,'results','*','*','sqanti_results.tsv')
+        for tsv in sorted(glob.glob(pattern)):
+            region = os.path.basename(os.path.dirname(os.path.dirname(tsv)))
+            runn   = os.path.basename(os.path.dirname(tsv))
+            plot_dir = os.path.join(args.outdir,'plots',region,runn)
+            print(f"Plotting {tsv} → {plot_dir}")
+            plot_summary(tsv, plot_dir)
 
 if __name__ == '__main__':
     main()
