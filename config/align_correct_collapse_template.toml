@@ -82,3 +82,14 @@ requires = ["combine"]
 [run.stages.flags]
 manifest = ""  # required when combine is upstream
 
+# ------------------------------------------------------------------------------------------------------------
+# -------- QC CONFIGURATION -----------------------------------------------
+# ------------------------------------------------------------------------------------------------------------
+
+[qc.collapse.TED]
+#window = 50
+
+# Optional SQANTI QC – runs sqanti3_qc if the conda environment exists
+[qc.collapse.SQANTI]
+#conda_env = "sqanti"   # name of SQANTI conda env; skip if missing
+#cpus = 8                # CPUs to pass to SQANTI3

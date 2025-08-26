@@ -8,6 +8,13 @@ and write sqanti.png under plots/region/run_name/, skipping if present.
 
 import os, sys, glob, argparse, pandas as pd, matplotlib.pyplot as plt
 
+# SQANTI isoform classes in canonical order
+ISOCLASSES = [
+    'FSM', 'ISM', 'NIC', 'NNC',
+    'Genic_Genomic', 'Genic_Intron',
+    'Antisense', 'Fusion', 'Intergenic'
+]
+
 # ─── same hack ───────────────────────────────────────────────────────────────
 THIS = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(THIS, "..", ".."))

@@ -260,6 +260,25 @@ def run_ted_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
         return {}
 
 
+def run_sqanti_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
+    """Run SQANTI QC and return metrics if successful."""
+    try:
+        from ..qc.sqanti import collect as sqanti_collect
+
+        sqanti_collect(stage_dir, cfg, upstreams=upstreams)
+        tsv = stage_dir / "sqanti_results.tsv"
+        if not tsv.exists():
+            raise RuntimeError("sqanti_results.tsv missing")
+        return {"SQANTI": {"tsv": str(tsv)}}
+    except Exception as e:  # pragma: no cover - logging only
+        logging.warning(f"[{stage_name}] SQANTI QC failed: {e}")
+        try:
+            (stage_dir / "sqanti_results.tsv").unlink()
+        except FileNotFoundError:
+            pass
+        return {}
+
+
 def build_flair_cmds(
     subcmd: str,
     pairs: list[tuple[Path, str]],

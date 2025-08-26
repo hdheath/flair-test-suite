@@ -105,8 +105,8 @@ The test suite expects the user to have, at bare minimum :
 | `align`         | BAM + BED             | MAPQ, read identity/length, unique junctions, splice motifs |
 | `correct`       | corrected BED         | reads removed %, unique junctions, splice-motifs            |
 | `regionalize`         | region BAM/BED/FA/GTF | feature counts from GTF (e.g., number of genes)             |
-| `collapse`      | isoforms BED/GTF      | *QC TBD*                                                    |
-| `transcriptome` | isoforms BED/GTF      | *QC TBD*                                                    |
+| `collapse`      | isoforms BED/GTF      | TED metrics, SQANTI classification                         |
+| `transcriptome` | isoforms BED/GTF      | TED metrics, SQANTI classification                         |
 
 PNG plots and TSV metrics are saved next to each stage’s outputs.
 

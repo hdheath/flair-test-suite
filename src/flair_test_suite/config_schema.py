@@ -89,3 +89,9 @@ class Config(BaseModel):
     run_id: Optional[str] = None
     run: RunConfig
     qc: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SQANTIQCConfig(BaseModel):
+    """Configuration block for optional SQANTI QC."""
+    conda_env: str
+    cpus: int = 1
