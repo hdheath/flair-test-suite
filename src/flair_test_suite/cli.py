@@ -56,7 +56,16 @@ def _execute_stage(st_cfg, cfg, run_id: str, work_dir: Path, upstreams: Dict[str
     """Execute one stage. Returns (failed, skipped)."""
     StageCls = STAGE_REGISTRY[st_cfg.name]
     stage_instance = StageCls(cfg, run_id, work_dir, upstreams)
-    stage_instance.build_cmd()
+    # Normalize/build commands using the stage's helper which supports both
+    # the preferred build_cmds() API and the legacy build_cmd() shim.
+    try:
+        # Use the class helper to prepare commands; it will call build_cmds()
+        # and fall back to build_cmd() if necessary.
+        stage_instance._build_and_normalize_cmds()
+    except Exception:
+        # If something goes wrong building commands, let run() handle it and
+        # surface a clear error later during execution.
+        pass
 
     try:
         pb = stage_instance.run()
