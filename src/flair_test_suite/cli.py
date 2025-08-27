@@ -5,8 +5,6 @@ import warnings
 import logging
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, Optional, Tuple
-from datetime import datetime
-import shutil
 
 import click
 
@@ -15,6 +13,9 @@ from .stages import STAGE_REGISTRY
 from .lib import topological_sort
 from .lib.logging import setup_run_logging
 from .lib.paths import PathBuilder, format_path
+
+
+logger = logging.getLogger(__name__)
 
 
 # ────────────────────────── helpers ──────────────────────────
@@ -43,18 +44,11 @@ def _load_cfg(cfg_path: Path):
 def _prepare_logfile(cfg, run_id: str, work_dir: Path, seen_run_ids: set, quiet: bool) -> Path:
     log_dir = work_dir / run_id
     log_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_path = log_dir / f"run_summary_{ts}.log"
-    setup_run_logging(log_path, mode="w", quiet=quiet)
-    latest = log_dir / "run_summary.log"
-    try:
-        if latest.exists() or latest.is_symlink():
-            latest.unlink()
-        latest.symlink_to(log_path.name)
-    except OSError:
-        shutil.copy2(log_path, latest)
+    log_path = log_dir / "run_summary.log"
+    mode = "a" if run_id in seen_run_ids else "w"
+    setup_run_logging(log_path, mode=mode, quiet=quiet)
     seen_run_ids.add(run_id)
-    logging.info(f"Run summary: {format_path(log_path, work_dir)}")
+    logger.info("Run summary: %s", format_path(log_path, work_dir))
     return log_path
 
 
@@ -74,13 +68,13 @@ def _execute_stage(
     except Exception:
         pass
 
-    logging.info(f"Starting {st_cfg.name}")
+    logger.info("Starting %s", st_cfg.name)
     click.echo(f"Running {st_cfg.name}")
 
     try:
         pb = stage_instance.run()
     except Exception as e:
-        logging.error(f"Stage {st_cfg.name} failed: {e}")
+        logger.error("Stage %s failed: %s", st_cfg.name, e)
         click.echo(f"Stage {st_cfg.name} failed: {e}", err=True)
         return True, True  # failed, skipped
     else:
@@ -89,15 +83,15 @@ def _execute_stage(
         if pb is not None:
             path_root = None if absolute_paths else work_dir
             out_path = format_path(pb.stage_dir, path_root)
-            logging.info(f"✓ Done {st_cfg.name} – outputs: {out_path}")
+            logger.info("\u2713 Done %s – outputs: %s", st_cfg.name, out_path)
         else:
-            logging.warning(f"Stage {st_cfg.name} produced no outputs.")
+            logger.warning("Stage %s produced no outputs.", st_cfg.name)
         if skipped:
             click.echo(f"Skipping {st_cfg.name}")
-            logging.info(f"Skipped {st_cfg.name}")
+            logger.info("Skipped %s", st_cfg.name)
         else:
             click.echo(f"Completed {st_cfg.name}")
-            logging.info(f"Completed {st_cfg.name}")
+            logger.info("Completed %s", st_cfg.name)
         return False, skipped
 
 
@@ -122,7 +116,7 @@ def run_configs(inputs: Iterable[Path], absolute_paths: bool = False) -> int:
         run_id = getattr(cfg, "run_id", None) or getattr(cfg.run, "run_id", None)
         work_dir = Path(cfg.run.work_dir)
         log_path = _prepare_logfile(cfg, run_id, work_dir, seen_run_ids, quiet=True)
-        logging.info(f"Loading config: {cfg_path}")
+        logger.info("Loading config: %s", cfg_path)
 
         stage_order = topological_sort(cfg.run.stages)
         upstreams: Dict[str, PathBuilder] = {}
@@ -155,15 +149,15 @@ def run_configs(inputs: Iterable[Path], absolute_paths: bool = False) -> int:
         raise click.UsageError("No valid configuration files were executed.")
 
     if all_configs_skipped:
-        logging.info("All configurations are up to date; nothing to do.")
+        logger.info("All configurations are up to date; nothing to do.")
         return 0
     if any_failed:
-        logging.error(
+        logger.error(
             "Pipeline failed: at least one stage did not complete successfully."
         )
         return 1
     if any_ran:
-        logging.info("All stages completed successfully.")
+        logger.info("All stages completed successfully.")
     return 0
 
 

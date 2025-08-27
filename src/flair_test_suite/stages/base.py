@@ -19,6 +19,9 @@ from ..qc import QC_REGISTRY
 from .stage_utils import get_stage_config, parse_cli_flags
 
 
+logger = logging.getLogger(__name__)
+
+
 class StageAction(Enum):
     RUN = auto()
     SKIP = auto()
@@ -57,6 +60,7 @@ class StageBase(ABC):
         self._sig: Optional[str] = None
         self._flags_str: str = ""
         self._input_hashes: List[str] = []
+        self.logger = logger.getChild(self.name)
 
     # ─────────────────────────────── Required API ───────────────────────────────
 
@@ -96,13 +100,13 @@ class StageBase(ABC):
                     p = resolve_path(item, data_dir=data_dir)
                     paths.append(p)
                     if not p.exists():
-                        logging.warning(f"[{self.name}] Input file missing: {key} -> {p}")
+                        self.logger.warning("Input file missing: %s -> %s", key, p)
                 resolved[key] = paths
             else:
                 p = resolve_path(raw, data_dir=data_dir)
                 resolved[key] = p
                 if not p.exists():
-                    logging.warning(f"[{self.name}] Input file missing: {key} -> {p}")
+                    self.logger.warning("Input file missing: %s -> %s", key, p)
         return resolved
 
     def resolve_stage_flags(self, raw_flags=None) -> tuple[list[str], list[Path]]:
@@ -166,24 +170,24 @@ class StageBase(ABC):
         )
         if decision == "run":
             if primary.exists():
-                logging.warning(
-                    f"Primary output exists before run for {self.name}; will overwrite"
+                self.logger.warning(
+                    "Primary output exists before run; will overwrite"
                 )
             result = StageAction.RUN
         elif decision == "skip":
             result = StageAction.SKIP
         elif decision == "qc":
-            logging.warning(
-                f"Primary exists but QC incomplete for {self.name}; regenerating QC"
+            self.logger.warning(
+                "Primary exists but QC incomplete; regenerating QC"
             )
             result = StageAction.QC_ONLY
         else:
             raise ValueError(f"Unknown Reinstate decision: {decision}")
-        logging.info(f"[{self.name}] action: {result}")
+        self.logger.info("action: %s", result)
         return result
 
     def _handle_skip(self, pb: PathBuilder) -> PathBuilder:
-        logging.info(f"[SKIP] {self.name} complete (sig={self.signature})")
+        self.logger.info("[SKIP] complete (sig=%s)", self.signature)
         try:
             full_meta = load_marker(pb.stage_dir)
             pb.metadata = full_meta if isinstance(full_meta, dict) else {}
@@ -192,7 +196,7 @@ class StageBase(ABC):
         return pb
 
     def _handle_qc_only(self, pb: PathBuilder, primary: Path) -> PathBuilder:
-        logging.info(f"[QC] Regenerating QC for {self.name} (sig={self.signature})")
+        self.logger.info("[QC] Regenerating QC (sig=%s)", self.signature)
         qc_metrics = self._run_qc(pb.stage_dir, primary, runtime=None)
         pb.metadata = qc_metrics
         old_meta = load_marker(pb.stage_dir / ".completed.json")
@@ -208,14 +212,14 @@ class StageBase(ABC):
         start_ts = time.time()
         exit_code = self._run_all(cmds, log_path=stage_dir / "tool.log", cwd=stage_dir)
         runtime_sec = round(time.time() - start_ts, 2)
-        logging.info(
-            f"[{self.name}] commands finished in {runtime_sec}s (exit {exit_code})"
+        self.logger.info(
+            "commands finished in %ss (exit %s)", runtime_sec, exit_code
         )
         return runtime_sec, exit_code, start_ts
 
     def _validate_primary_output(self, primary: Path) -> None:
         if not primary.exists():
-            logging.warning(f"Stage {self.name} completed but primary output missing: {primary}")
+            self.logger.warning("Stage completed but primary output missing: %s", primary)
             raise RuntimeError(f"Stage {self.name} failed: missing primary output {primary}")
 
     def _finalize_stage(
@@ -261,7 +265,7 @@ class StageBase(ABC):
 
     def _complete_empty_stage(self, pb: PathBuilder) -> PathBuilder:
         """Write minimal QC + marker when there is nothing to run."""
-        logging.info(f"[{self.name}] No commands to run; completing with minimal QC.")
+        self.logger.info("No commands to run; completing with minimal QC.")
         stage_dir = pb.stage_dir
         qc_summary = {"regions": 0, "qc_runtime_sec": 0.0, "all_skipped_empty": True}
 
@@ -292,15 +296,15 @@ class StageBase(ABC):
         for cmd in cmds:
             exit_code = self.run_tool(cmd, log_path=log_path, cwd=cwd)
             if exit_code != 0:
-                logging.warning(
-                    f"External tool for stage {self.name} exited with code {exit_code}"
+                self.logger.warning(
+                    "External tool exited with code %s", exit_code
                 )
                 break
         return exit_code
 
     def _run_qc(self, stage_dir: Path, primary: Path, runtime: float | None) -> Dict:
         """Generic QC runner. Stages may override this (e.g., CorrectStage)."""
-        logging.info(f"Executing _run_qc for stage: {self.name}")
+        self.logger.info("Executing _run_qc")
         qc_func = QC_REGISTRY.get(self.name)
         if not qc_func or not primary.exists():
             return {}
@@ -322,10 +326,10 @@ class StageBase(ABC):
                 )
             else:
                 metrics = qc_func(primary, **kwargs)
-            logging.info(f"QC metrics for {self.name}: {metrics}")
+            self.logger.info("QC metrics: %s", metrics)
             return metrics
         except Exception as e:
-            logging.info(f"QC for '{self.name}' failed: {e}")
+            self.logger.info("QC failed: %s", e)
             return {}
 
     def _make_marker(
@@ -391,14 +395,14 @@ class StageBase(ABC):
         env = self.cfg.run.conda_env
         full_cmd = ["conda", "run", "-n", env] + cmd if cmd and cmd[0] != "conda" else cmd
         log_path = log_path or Path("tool.log")
-        logging.info(f"[{self.name}] Running: {' '.join(full_cmd)}")
+        self.logger.info("Running: %s", ' '.join(full_cmd))
 
         with open(log_path, "w") as logf:
             proc = subprocess.run(full_cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=cwd)
 
         if proc.returncode != 0:
-            logging.error(
-                f"[{self.name}] Command failed: {' '.join(full_cmd)} (exit {proc.returncode})"
+            self.logger.error(
+                "Command failed: %s (exit %s)", ' '.join(full_cmd), proc.returncode
             )
             raise RuntimeError(f"{self.name} failed with exit code {proc.returncode}")
         return proc.returncode

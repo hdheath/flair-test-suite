@@ -9,6 +9,9 @@ from .base import StageBase
 from .stage_utils import get_stage_config, resolve_path
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class ManifestEntry:
     """Representation of one row in the FLAIR combine manifest."""
@@ -81,7 +84,7 @@ class CombineStage(StageBase):
                 )
                 collected += 1
             if collected == 0:
-                logging.debug(f"[combine] no isoforms found in upstream dir {d}")
+                logger.debug("No isoforms found in upstream dir %s", d)
             return collected
 
         collected = 0
@@ -90,17 +93,17 @@ class CombineStage(StageBase):
         if collected == 0:
             # only warn if neither upstream provided any entries; user manifest may still be used
             if collapse_pb or transcriptome_pb:
-                logging.warning(f"[combine] no isoform outputs found in collapse/transcriptome upstreams")
+                logger.warning("No isoform outputs found in collapse/transcriptome upstreams")
 
         # Load user manifest file if provided
         if manifest_src:
             self._user_manifest = resolve_path(manifest_src, data_dir=data_dir)
             if not self._user_manifest.exists():
-                logging.warning(f"[combine] manifest file missing: {self._user_manifest}")
+                logger.warning("Manifest file missing: %s", self._user_manifest)
 
         # Store collapse entries for later appending
         if not entries and not self._user_manifest:
-            raise RuntimeError("[combine] no isoform files found for manifest")
+            raise RuntimeError("no isoform files found for manifest")
 
         self._manifest_entries = entries
 

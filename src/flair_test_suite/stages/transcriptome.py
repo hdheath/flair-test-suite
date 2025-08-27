@@ -15,6 +15,9 @@ from .stage_utils import (
     run_sqanti_qc,
 )
 
+
+logger = logging.getLogger(__name__)
+
 # Ensure TED QC is registered for this stage even if QC package isn't imported elsewhere
 try:  # pragma: no cover - best effort, optional dependency
     from ..qc import ted as _force_import_ted  # noqa: F401
@@ -109,7 +112,7 @@ class TranscriptomeStage(StageBase):
             use_bam=True,
         )
 
-        logging.debug(f"[transcriptome] mode={mode} commands={len(cmds)}")
+        logger.debug("mode=%s commands=%s", mode, len(cmds))
         return cmds
 
     # Legacy shim
