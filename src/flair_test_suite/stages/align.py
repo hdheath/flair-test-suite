@@ -59,16 +59,18 @@ class AlignStage(StageBase):
         self._hash_inputs.extend(extra_inputs)
         self._flags_components = flag_parts
 
-        # --- capture `flair --version` once per run ---
+        # --- use the version supplied in the config (preferred) ---
         if not hasattr(self, "_tool_version"):
-            try:
-                raw = subprocess.check_output(
-                    ["conda", "run", "-n", cfg.run.conda_env, "flair", "--version"],
-                    text=True
-                ).strip()
-                self._tool_version = raw.splitlines()[-1] if raw else "flair-unknown"
-            except subprocess.CalledProcessError:
-                logger.warning("Could not run `flair --version`; using 'flair-unknown'")
+            cfg_ver = getattr(cfg.run, "version", None)
+            if cfg_ver:
+                # Accept either '2.1.1' or 'flair 2.1.1' from config; normalize sensibly
+                s = str(cfg_ver).strip()
+                if s.lower().startswith("flair"):
+                    self._tool_version = s
+                else:
+                    self._tool_version = f"flair {s}"
+            else:
+                logger.warning("No version provided in config.run.version; using 'flair-unknown'")
                 self._tool_version = "flair-unknown"
 
         if not flag_parts:
