@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Iterable, Iterator, Tuple, List
 
 
+logger = logging.getLogger(__name__)
+
+
 def count_reads(fp: Path) -> int:
     """Return number of reads in a FASTA or FASTQ file.
 
@@ -159,7 +162,6 @@ def parse_cli_flags(
       • flag_parts   (for subprocess command)
       • extra_inputs (files that should be hashed)
     """
-    import logging
 
     flag_parts: List[str] = []
     extra_inputs: List[Path] = []
@@ -174,7 +176,7 @@ def parse_cli_flags(
 
     for k, v in flags_block.items():
         if v is False:  # user explicitly disabled
-            logging.warning(f"Flag '{k}' is set to False and will be skipped.")
+            logger.warning("Flag '%s' is set to False and will be skipped.", k)
             continue
         if v in (None, "", True):
             _push(k)
@@ -186,13 +188,16 @@ def parse_cli_flags(
                 _push(k, p)
                 extra_inputs.append(p)
             else:
-                logging.warning(
-                    f"Flag '{k}' value '{v}' does not resolve to an existing file."
-                    " Treating as option."
+                logger.warning(
+                    "Flag '%s' value '%s' does not resolve to an existing file. Treating as option.",
+                    k,
+                    v,
                 )
                 _push(k, v)
         else:
-            logging.warning(f"Flag '{k}' has an unrecognized type ({type(v)}). Treating as option.")
+            logger.warning(
+                "Flag '%s' has an unrecognized type (%s). Treating as option.", k, type(v)
+            )
             _push(k, v)
 
     return flag_parts, extra_inputs
@@ -241,9 +246,9 @@ def collect_upstream_pairs(
                         upstream_sigs.append(pb.signature)
                     break
             if not fpath:
-                logging.warning(
-                    f"[{stage_name}] Skipping missing/empty input: "
-                    f"{regionalized_suffix.format(chrom=chrom, start=start, end=end)}"
+                logging.getLogger(stage_name).warning(
+                    "Skipping missing/empty input: %s",
+                    regionalized_suffix.format(chrom=chrom, start=start, end=end),
                 )
                 continue
             pairs.append((fpath, tag))
@@ -302,7 +307,7 @@ def run_ted_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
         tsv_path = out_dir / "TED.tsv"
         return {"TED": {"tsv": str(tsv_path)}}
     except Exception as e:  # pragma: no cover - logging only
-        logging.warning(f"[{stage_name}] TED QC failed: {e}")
+        logging.getLogger(stage_name).warning("TED QC failed: %s", e)
         try:
             (stage_dir / "qc" / "ted" / "TED.tsv").unlink()
         except FileNotFoundError:
@@ -322,7 +327,7 @@ def run_sqanti_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
             raise RuntimeError("sqanti_results.tsv missing")
         return {"SQANTI": {"tsv": str(tsv)}}
     except Exception as e:  # pragma: no cover - logging only
-        logging.warning(f"[{stage_name}] SQANTI QC failed: {e}")
+        logging.getLogger(stage_name).warning("SQANTI QC failed: %s", e)
         try:
             (stage_dir / "qc" / "sqanti" / "sqanti_results.tsv").unlink()
         except FileNotFoundError:
@@ -383,7 +388,7 @@ def filter_file_by_regions(src: Path, out: Path, lookup, filetype: str):
     elif filetype == "gtf":
         start_i, end_i, add1 = 3, 4, False
     else:
-        logging.warning(f"Unsupported filetype for filtering: {filetype}")
+        logger.warning("Unsupported filetype for filtering: %s", filetype)
         return
     kept = 0
     with open(src) as inf, open(out, "w") as outf:
@@ -391,20 +396,20 @@ def filter_file_by_regions(src: Path, out: Path, lookup, filetype: str):
             if not L.strip() or L.startswith("#"): continue
             parts = L.rstrip("\n").split("\t")
             if len(parts) <= max(start_i, end_i):
-                logging.warning(f"{src.name} line {ln}: insufficient cols")
+                logger.warning("%s line %s: insufficient cols", src.name, ln)
                 continue
             chrom = parts[0]
             try:
                 s = int(parts[start_i]) + (1 if add1 else 0)
                 e = int(parts[end_i])
             except ValueError:
-                logging.warning(f"{src.name} line {ln}: bad coords")
+                logger.warning("%s line %s: bad coords", src.name, ln)
                 continue
             if lookup.contains(chrom, s, e):
                 outf.write(L)
                 kept += 1
     if kept == 0:
-        logging.warning(f"{out.name} empty after filtering")
+        logger.warning("%s empty after filtering", out.name)
 
 
 def read_region_details(tsv: Path) -> List[tuple[str, str, str]]:
@@ -418,8 +423,8 @@ def read_region_details(tsv: Path) -> List[tuple[str, str, str]]:
                 continue
             parts = line.split("\t")
             if len(parts) < 3:
-                logging.warning(
-                    f"{tsv.name} line {len(regions) + 2}: fewer than 3 columns"
+                logger.warning(
+                    "%s line %s: fewer than 3 columns", tsv.name, len(regions) + 2
                 )
                 continue
             chrom, start, end = parts[0], parts[1], parts[2]

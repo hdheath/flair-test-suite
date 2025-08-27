@@ -10,6 +10,9 @@ from ..lib.paths import PathBuilder
 from ..lib.input_hash import hash_many
 import subprocess
 
+
+logger = logging.getLogger(__name__)
+
 # Force-load QC so it's registered
 try:
     from ..qc import regionalize_qc as _force_import_regionalize_qc  # noqa: F401
@@ -29,12 +32,12 @@ def _read_regions(tsv: Path) -> List[Region]:
             continue
         parts = line.split()
         if len(parts) < 3:
-            logging.warning(f"[regionalize] regions TSV line {ln}: fewer than 3 columns")
+            logger.warning("regions TSV line %d: fewer than 3 columns", ln)
             continue
         try:
             chrom = parts[0]; s = int(parts[1]); e = int(parts[2])
         except ValueError:
-            logging.warning(f"[regionalize] regions TSV line {ln}: non-integer coords")
+            logger.warning("regions TSV line %d: non-integer coords", ln)
             continue
         if s > e:
             s, e = e, s
@@ -75,10 +78,10 @@ class RegionalizeStage(StageBase):
         override_bed = flags.get("bed")
         if override_bed:
             self._bed_file = resolve_path(override_bed, data_dir=data_dir)
-            logging.info(f"[regionalize] Using override BED: {self._bed_file}")
+            self.logger.info("Using override BED: %s", self._bed_file)
         elif self._align_bed.exists():
             self._bed_file = self._align_bed
-            logging.info(f"[regionalize] Using align BED: {self._bed_file}")
+            self.logger.info("Using align BED: %s", self._bed_file)
         else:
             raise RuntimeError("No valid BED file found for regionalize stage.")
 
@@ -111,7 +114,7 @@ class RegionalizeStage(StageBase):
             if v:
                 p = resolve_path(v, data_dir=data_dir)
                 self._optional[k] = p
-                logging.info(f"[regionalize] Optional input: {k} -> {p}")
+                self.logger.info("Optional input: %s -> %s", k, p)
 
         # Signature inputs
         self._hash_inputs = [
@@ -176,7 +179,7 @@ class RegionalizeStage(StageBase):
                         "'%s' > '%s'; test -s '%s' || : > '%s'"
                     ) % (chrom, start, end, str(p), dst, dst, dst)
                     cmds.append(["bash", "-lc", awk])
-                    logging.info(f"[regionalize] will slice SJ.out.tab -> {dst}")
+                    self.logger.info("Will slice SJ.out.tab -> %s", dst)
                 else:
                     # Treat as BED-like (0-based, cols 2-3)
                     dst = f"{tag}_{Path(p).name}"
@@ -186,7 +189,7 @@ class RegionalizeStage(StageBase):
                         "'%s' > '%s'; test -s '%s' || : > '%s'"
                     ) % (chrom, start, end, str(p), dst, dst, dst)
                     cmds.append(["bash", "-lc", awk])
-                    logging.info(f"[regionalize] will slice BED-like optional -> {dst}")
+                    self.logger.info("Will slice BED-like optional -> %s", dst)
 
         return cmds
 
@@ -201,12 +204,14 @@ class RegionalizeStage(StageBase):
         log_path = log_path or Path("tool.log")
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logging.info(f"[{self.name}] Running: {' '.join(cmd)}")
+        self.logger.info("Running: %s", ' '.join(cmd))
         with open(log_path, "a") as logf:
             proc = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=cwd)
 
         if proc.returncode != 0:
-            logging.error(f"[{self.name}] Command failed (exit {proc.returncode}): {' '.join(cmd)}")
+            self.logger.error(
+                "Command failed (exit %s): %s", proc.returncode, ' '.join(cmd)
+            )
             raise RuntimeError(f"{self.name} failed with exit code {proc.returncode}")
         return proc.returncode
 

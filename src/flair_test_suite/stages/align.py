@@ -14,6 +14,9 @@ from .base import StageBase       # base class providing orchestration logic
 
 from .stage_utils import estimate_read_count, make_flair_cmd
 
+
+logger = logging.getLogger(__name__)
+
 class AlignStage(StageBase):
     name = "align"
 
@@ -46,7 +49,7 @@ class AlignStage(StageBase):
         self._n_input_reads = total
         self._read_count_method = "exact" if all_exact else "estimated"
         if self._n_input_reads == 0:
-            logging.warning(f"No reads counted in any input files: {resolved_reads}")
+            logger.warning("No reads counted in any input files: %s", resolved_reads)
 
         # --- inputs that affect the signature ---
         self._hash_inputs = resolved_reads + [genome]
@@ -65,11 +68,11 @@ class AlignStage(StageBase):
                 ).strip()
                 self._tool_version = raw.splitlines()[-1] if raw else "flair-unknown"
             except subprocess.CalledProcessError:
-                logging.warning("Could not run `flair --version`; using 'flair-unknown'")
+                logger.warning("Could not run `flair --version`; using 'flair-unknown'")
                 self._tool_version = "flair-unknown"
 
         if not flag_parts:
-            logging.warning("No extra flags configured for align stage; using defaults")
+            logger.warning("No extra flags configured for align stage; using defaults")
 
         # --- construct and return the final command list ---
         out_prefix = f"{self.run_id}_flair"

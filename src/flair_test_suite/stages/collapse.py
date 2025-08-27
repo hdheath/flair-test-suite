@@ -14,6 +14,9 @@ from .stage_utils import (
     run_ted_qc,
     run_sqanti_qc,
 )
+
+
+logger = logging.getLogger(__name__)
 # Force-load TED QC so Reinstate knows transcriptome has QC
 try:
     from ..qc import ted as _force_import_ted  # noqa: F401
@@ -91,7 +94,7 @@ class CollapseStage(StageBase):
             use_bed=True,
         )
 
-        logging.debug(f"[collapse] mode={mode} commands={len(cmds)}")
+        logger.debug("mode=%s commands=%s", mode, len(cmds))
         return cmds
 
     def expected_outputs(self) -> dict[str, Path]:

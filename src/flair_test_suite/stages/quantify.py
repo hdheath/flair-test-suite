@@ -8,6 +8,9 @@ from .base import StageBase
 from .stage_utils import get_stage_config, resolve_path
 
 
+logger = logging.getLogger(__name__)
+
+
 class QuantifyStage(StageBase):
     """FLAIR quantify stage.
 
@@ -56,8 +59,8 @@ class QuantifyStage(StageBase):
                     return cand
             except StopIteration:
                 pass
-            logging.debug(f"[quantify] no isoforms FASTA found in {pb.stage_dir}")
-        raise RuntimeError("[quantify] isoform FASTA not found in upstream outputs")
+            logger.debug("No isoforms FASTA found in %s", pb.stage_dir)
+        raise RuntimeError("isoform FASTA not found in upstream outputs")
 
     # ------------------------------------------------------------------
     def build_cmds(self) -> List[List[str]]:
@@ -67,7 +70,7 @@ class QuantifyStage(StageBase):
 
         manifest_src = raw_flags.pop("manifest", None)
         if manifest_src is None:
-            raise RuntimeError("[quantify] manifest file is required; provide via flags.manifest")
+            raise RuntimeError("manifest file is required; provide via flags.manifest")
         data_dir = Path(cfg.run.data_dir)
 
         isoforms_fa = self._find_isoforms_fasta()
@@ -78,21 +81,21 @@ class QuantifyStage(StageBase):
 
         self._user_manifest = resolve_path(manifest_src, data_dir=data_dir)
         if not self._user_manifest.exists():
-            raise FileNotFoundError(f"[quantify] manifest file missing: {self._user_manifest}")
+            raise FileNotFoundError(f"manifest file missing: {self._user_manifest}")
         for line in self._user_manifest.read_text().splitlines():
             if not line.strip() or line.startswith("#"):
                 continue
             parts = line.rstrip().split("\t")
             if len(parts) < 4:
-                raise RuntimeError(f"[quantify] manifest line has fewer than 4 columns: {line}")
+                raise RuntimeError(f"manifest line has fewer than 4 columns: {line}")
             sample, condition, batch, reads_str = parts[:4]
             reads_p = resolve_path(reads_str, data_dir=data_dir)
             if not reads_p.exists():
-                raise FileNotFoundError(f"[quantify] reads file missing: {reads_p}")
+                raise FileNotFoundError(f"reads file missing: {reads_p}")
             key = (condition, batch, reads_p)
             existing = seen.get(sample)
             if existing and existing != key:
-                raise RuntimeError(f"[quantify] conflicting manifest entry for sample '{sample}'")
+                raise RuntimeError(f"conflicting manifest entry for sample '{sample}'")
             seen[sample] = key
             reads_paths.append(reads_p)
 

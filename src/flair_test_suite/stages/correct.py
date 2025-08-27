@@ -11,6 +11,9 @@ from ..qc import write_metrics
 from ..qc.qc_utils import bed_is_empty
 
 
+logger = logging.getLogger(__name__)
+
+
 class CorrectStage(StageBase):
     """
     Runs `flair correct` on either:
@@ -67,7 +70,7 @@ class CorrectStage(StageBase):
         cmds: List[List[str]] = []
         for bed_file, region_tag in self._bed_files:
             if bed_is_empty(bed_file):
-                logging.warning(f"[correct] Skipping missing/empty BED: {bed_file}")
+                logger.warning("Skipping missing/empty BED: %s", bed_file)
                 continue
 
             out_prefix = region_tag

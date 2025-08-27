@@ -17,7 +17,7 @@ def setup_run_logging(log_path: Path, mode: str = "a", quiet: bool = False) -> N
 
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
         handlers=handlers,
     )
 
