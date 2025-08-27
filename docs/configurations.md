@@ -156,6 +156,28 @@ available sample number (maximum existing `sample` + 1). Paths are resolved
 relative to `data_dir`. Leave `fasta` and `read_map` blank if those files are
 unavailable.
 
+## Stage-by-stage templates with TSV manifest
+
+Instead of maintaining a single monolithic configuration, you can split the
+input data and individual stages into separate TOML files. A TSV file in the
+`config/` directory then lists test cases, one per line: the first column is the
+`run_id`, the second the input-data template, and subsequent columns name stage
+templates in the order they should run.
+
+```
+run1    base.toml    align.toml    collapse.toml
+```
+
+Relative paths are resolved against the TSV's directory. The input-data
+template may define `case_name` to group outputs under
+`<work_dir>/<case_name>/<run_id>/`.
+
+Execute every test case in the manifest with:
+
+```
+flair-test-suite config/cases.tsv
+```
+
 For more details, see the [FLAIR Test Suite Overview](./overview.md).
 
 ## Optional SQANTI QC

@@ -87,6 +87,7 @@ class RunConfig(BaseModel):
 
 class Config(BaseModel):
     run_id: Optional[str] = None
+    case_name: Optional[str] = None
     run: RunConfig
     qc: Dict[str, Any] = Field(default_factory=dict)
 

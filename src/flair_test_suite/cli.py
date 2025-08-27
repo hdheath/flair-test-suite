@@ -3,12 +3,14 @@
 import sys
 import warnings
 import logging
+import csv
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, Optional, Tuple
+from typing import Dict, Iterable, Iterator, Optional, Tuple, Union
 
 import click
 
-from .config_loader import load_config
+from .config_loader import load_config, load_config_fragments
+from .config_schema import Config
 from .stages import STAGE_REGISTRY
 from .lib import topological_sort
 from .lib.logging import setup_run_logging
@@ -32,6 +34,40 @@ def _iter_config_paths(tsv_path: Path) -> Iterator[Path]:
         yield cfg_path
 
 
+def parse_cases_tsv(tsv_path: Path) -> Iterator[Config]:
+    """Yield Config objects assembled from a TSV manifest.
+
+    Each non-empty line must contain at least a run ID and base config path
+    followed by zero or more stage config paths. Paths are resolved relative
+    to the TSV location.
+    """
+    with tsv_path.open() as fh:
+        reader = csv.reader(fh, delimiter="\t")
+        for row in reader:
+            if not row:
+                continue
+            if row[0].startswith("#"):
+                continue
+            if len(row) < 2:
+                raise ValueError("Each row must have run_id and base config path")
+            run_id = row[0].strip()
+            base_rel = row[1].strip()
+            stage_rel = [c.strip() for c in row[2:] if c.strip()]
+
+            def _resolve(p: str) -> Path:
+                path = Path(p)
+                if not path.is_absolute():
+                    path = (tsv_path.parent / path).resolve()
+                return path
+
+            base_path = _resolve(base_rel)
+            stage_paths = [_resolve(p) for p in stage_rel]
+
+            cfg = load_config_fragments(base_path, stage_paths)
+            cfg.run_id = run_id
+            yield cfg
+
+
 
 def _load_cfg(cfg_path: Path):
     try:
@@ -42,7 +78,11 @@ def _load_cfg(cfg_path: Path):
 
 
 def _prepare_logfile(cfg, run_id: str, work_dir: Path, seen_run_ids: set, quiet: bool) -> Path:
-    log_dir = work_dir / run_id
+    case_name = getattr(cfg, "case_name", None)
+    log_dir = work_dir
+    if case_name:
+        log_dir = log_dir / case_name
+    log_dir = log_dir / run_id
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "run_summary.log"
     mode = "a" if run_id in seen_run_ids else "w"
@@ -96,7 +136,9 @@ def _execute_stage(
 
 
 # ────────────────────────── main orchestration ──────────────────────────
-def run_configs(inputs: Iterable[Path], absolute_paths: bool = False) -> int:
+def run_configs(
+    inputs: Iterable[Union[Path, Config]], absolute_paths: bool = False
+) -> int:
     """Run one or more configuration files and return an exit code."""
 
     any_ran = False
@@ -104,14 +146,18 @@ def run_configs(inputs: Iterable[Path], absolute_paths: bool = False) -> int:
     all_configs_skipped = True
     seen_run_ids: set[str] = set()
 
-    for cfg_path in inputs:
-        if not cfg_path.exists():
-            warnings.warn(f"Config file not found: {cfg_path}", UserWarning)
-            continue
-
-        cfg = _load_cfg(cfg_path)
-        if not cfg:
-            continue
+    for item in inputs:
+        if isinstance(item, Path):
+            cfg_path = item
+            if not cfg_path.exists():
+                warnings.warn(f"Config file not found: {cfg_path}", UserWarning)
+                continue
+            cfg = _load_cfg(cfg_path)
+            if not cfg:
+                continue
+        else:
+            cfg = item
+            cfg_path = getattr(cfg, "_path", "<tsv>")
 
         run_id = getattr(cfg, "run_id", None) or getattr(cfg.run, "run_id", None)
         work_dir = Path(cfg.run.work_dir)
@@ -170,11 +216,18 @@ def run_configs(inputs: Iterable[Path], absolute_paths: bool = False) -> int:
 )
 def main(config_input: Path, absolute_paths: bool) -> None:
     """Entry point for the CLI."""
-    inputs = (
-        _iter_config_paths(config_input)
-        if config_input.suffix.lower() in (".tsv", ".txt")
-        else [config_input]
-    )
+    if config_input.suffix.lower() in (".tsv", ".txt"):
+        lines = [
+            l
+            for l in config_input.read_text().splitlines()
+            if l.strip() and not l.startswith("#")
+        ]
+        if lines and lines[0].count("\t") >= 2:
+            inputs = list(parse_cases_tsv(config_input))
+        else:
+            inputs = list(_iter_config_paths(config_input))
+    else:
+        inputs = [config_input]
     sys.exit(run_configs(inputs, absolute_paths))
 
 
