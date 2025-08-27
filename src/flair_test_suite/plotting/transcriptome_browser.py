@@ -540,8 +540,9 @@ def generate(cfg: Config, region: Optional[str] = None) -> Optional[Path]:
     fig.savefig(out_png, dpi=fig.dpi)
     plt.close(fig)
     width_px, height_px = int(fig_w * fig.dpi), int(fig_h * fig.dpi)
-    print(f"Figure dimensions: {width_px} x {height_px} pixels")
-    print(f"Saved: {out_png}")
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Figure dimensions: {width_px} x {height_px} pixels")
+    logger.debug(f"Saved: {out_png}")
     return out_png
 
 

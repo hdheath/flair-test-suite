@@ -759,18 +759,18 @@ def collect(
             for key, conf in peaks_cfg.items():
                 base = Path(conf).name
                 sliced = (reg_dir_for_tag / f"{tag}_{base}") if reg_dir_for_tag else None
-                print(f"[TED] Looking for sliced peak file for key '{key}': {sliced}")
+                logger.debug(f"[TED] Looking for sliced peak file for key '{key}': {sliced}")
                 if sliced and sliced.exists() and sliced.stat().st_size > 0:
-                    print(f"[TED] Found sliced peak file for key '{key}': {sliced}")
+                    logger.debug(f"[TED] Found sliced peak file for key '{key}': {sliced}")
                     peaks[key] = sliced
                 else:
                     rp = _resolve(conf, data_dir)
-                    print(f"[TED] Looking for global peak file for key '{key}': {rp}")
+                    logger.debug(f"[TED] Looking for global peak file for key '{key}': {rp}")
                     if not (rp and rp.exists() and rp.stat().st_size > 0):
-                        print(f"[TED] Peaks file for key '{key}' and region {tag} not found: {conf}")
+                        logger.warning(f"[TED] Peaks file for key '{key}' and region {tag} not found: {conf}")
                         peaks[key] = None
                     else:
-                        print(f"[TED] Found global peak file for key '{key}': {rp}")
+                        logger.debug(f"[TED] Found global peak file for key '{key}': {rp}")
                         peaks[key] = rp
 
             logging.debug(f"[TED] For region {tag}, resolved peaks: { {k: str(v) if v else None for k,v in peaks.items()} }")

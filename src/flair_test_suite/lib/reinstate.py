@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Literal
 from .signature import qc_sidecar_path, load_marker
@@ -70,11 +71,16 @@ class Reinstate:
             qc_ok = True
             qc_desc = "n/a"
 
-        print(f"[Reinstate] Stage: {stage_name}")
-        print(f"  Marker: {marker_f} exists? {marker_ok}")
-        print(f"  Primary: {primary} exists? {primary_ok}")
-        print(f"  QC: {qc_desc}")
-        print(f"  All files in {stage_dir}: {list(stage_dir.iterdir())}")
+        logger = logging.getLogger(__name__)
+        logger.info(f"[Reinstate] Stage: {stage_name}")
+        logger.info(f"  Marker: {marker_f} exists? {marker_ok}")
+        logger.info(f"  Primary: {primary} exists? {primary_ok}")
+        logger.info(f"  QC: {qc_desc}")
+        try:
+            files = [p.name for p in stage_dir.iterdir()]
+        except Exception:
+            files = []
+        logger.info(f"  All files in {stage_dir}: {files}")
 
         if marker_ok and primary_ok and qc_ok:
             return "skip"

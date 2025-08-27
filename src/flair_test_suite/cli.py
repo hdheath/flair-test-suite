@@ -94,8 +94,10 @@ def _execute_stage(
             logging.warning(f"Stage {st_cfg.name} produced no outputs.")
         if skipped:
             click.echo(f"Skipping {st_cfg.name}")
+            logging.info(f"Skipped {st_cfg.name}")
         else:
             click.echo(f"Completed {st_cfg.name}")
+            logging.info(f"Completed {st_cfg.name}")
         return False, skipped
 
 
@@ -126,6 +128,12 @@ def run_configs(inputs: Iterable[Path], absolute_paths: bool = False) -> int:
         upstreams: Dict[str, PathBuilder] = {}
         click.echo(f"Starting run '{run_id}' with {len(stage_order)} stage(s)")
         click.echo(f"Run summary: {click.style(str(log_path), fg='cyan')}")
+        # Also print a concise stdout message listing the stages to be executed
+        try:
+            stage_names = [st_cfg.name for st_cfg in stage_order]
+        except Exception:
+            stage_names = [str(s) for s in stage_order]
+        print(f"Starting run '{run_id}' with {len(stage_order)} stage(s): {', '.join(stage_names)}")
 
         all_skipped = True
         for st_cfg in stage_order:

@@ -6,7 +6,9 @@ Find every sqanti_results.tsv under results/, plot a 3‐panel figure,
 and write sqanti.png under plots/region/run_name/, skipping if present.
 """
 
-import os, sys, glob, argparse, pandas as pd, matplotlib.pyplot as plt
+import os, sys, glob, argparse, logging
+import pandas as pd
+import matplotlib.pyplot as plt
 
 # SQANTI isoform classes in canonical order
 ISOCLASSES = [
@@ -22,6 +24,9 @@ SRC  = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+logger = logging.getLogger(__name__)
+
+
 def plot_summary(summary_tsv_or_df, plot_dir):
     """Plot a summary from a TSV filepath or a pandas.DataFrame.
 
@@ -31,7 +36,7 @@ def plot_summary(summary_tsv_or_df, plot_dir):
     """
     out_png = os.path.join(plot_dir, "sqanti.png")
     if os.path.exists(out_png):
-        print(f"[SKIP] plot already exists: {out_png}")
+        logger.debug(f"[SKIP] plot already exists: {out_png}")
         return
 
     os.makedirs(plot_dir, exist_ok=True)
@@ -66,7 +71,7 @@ def plot_summary(summary_tsv_or_df, plot_dir):
 
     plt.savefig(out_png, dpi=300)
     plt.close()
-    print(f"[✓] Wrote plot {out_png}")
+    logger.debug(f"[✓] Wrote plot {out_png}")
 
 def main():
     p = argparse.ArgumentParser()
@@ -81,7 +86,7 @@ def main():
         # derive a reasonable plot directory under outdir/plots/<basename>
         base = os.path.splitext(os.path.basename(tsv))[0]
         plot_dir = os.path.join(args.outdir, 'plots', base)
-        print(f"Plotting {tsv} → {plot_dir}")
+        logger.debug(f"Plotting {tsv} → {plot_dir}")
         plot_summary(tsv, plot_dir)
     else:
         pattern = os.path.join(args.outdir,'results','*','*','qc','sqanti','sqanti_results.tsv')
@@ -90,7 +95,7 @@ def main():
             region = parts[-5]
             runn   = parts[-4]
             plot_dir = os.path.join(args.outdir,'plots',region,runn)
-            print(f"Plotting {tsv} → {plot_dir}")
+            logger.debug(f"Plotting {tsv} → {plot_dir}")
             plot_summary(tsv, plot_dir)
 
 if __name__ == '__main__':
