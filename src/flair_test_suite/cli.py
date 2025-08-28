@@ -72,6 +72,11 @@ def parse_cases_tsv(tsv_path: Path) -> Iterator[Config]:
                     "Each row must include at least one stage fragment after the base config"
                 )
             cfg = load_config_fragments(base_path, stage_paths)
+            # Remember source TSV for logging/diagnostics
+            try:
+                setattr(cfg, "_path", str(tsv_path))
+            except Exception:
+                pass
             rid = (
                 getattr(cfg, "test_set_id", None)
                 or getattr(cfg.run, "test_set_id", None)
@@ -183,7 +188,13 @@ def run_configs(
         # Hardcode work_dir to ./outputs regardless of config
         work_dir = Path("./outputs")
         log_path = _prepare_logfile(cfg, run_id, work_dir, seen_run_ids, quiet=True)
-        logger.info("Loading config: %s", cfg_path)
+        # Log which case index we are executing (1-based) for this TSV
+        idx = getattr(cfg, "_case_idx", None)
+        total = getattr(cfg, "_case_total", None)
+        if idx and total:
+            logger.info("Executing test case %s/%s from %s", idx, total, cfg_path)
+        else:
+            logger.info("Loading config: %s", cfg_path)
 
         # Validate TSV ordering and duplicates before attempting to run
         try:
@@ -247,6 +258,14 @@ def main(config_input: Path, absolute_paths: bool) -> None:
     """Entry point for the CLI."""
     if config_input.suffix.lower() in (".tsv", ".txt"):
         inputs = list(parse_cases_tsv(config_input))
+        # Annotate each Config with its index to log in the run summary
+        total = len(inputs)
+        for i, cfg in enumerate(inputs, 1):
+            try:
+                setattr(cfg, "_case_idx", i)
+                setattr(cfg, "_case_total", total)
+            except Exception:
+                pass
     else:
         raise click.UsageError("Only TSV manifests are supported. Provide a TSV with: base_config\tstage1\tstage2...")
     sys.exit(run_configs(inputs, absolute_paths))

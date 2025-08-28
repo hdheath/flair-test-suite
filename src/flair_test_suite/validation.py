@@ -47,14 +47,30 @@ def validate_stage_order(cfg: Config) -> None:
             if "align" not in seen:
                 raise ValueError("regionalize must appear after align in the TSV list")
         elif n == "correct":
+            # correct must follow align (optionally regionalize) and cannot
+            # follow any downstream aggregation/terminal stages
             if "align" not in seen:
                 raise ValueError("correct must appear after align in the TSV list")
+            forbidden = {"transcriptome", "collapse", "combine", "quantify"}
+            bad = forbidden.intersection(seen)
+            if bad:
+                raise ValueError(
+                    "correct cannot follow these stages: " + ", ".join(sorted(bad))
+                )
         elif n == "collapse":
             if "correct" not in seen:
                 raise ValueError("collapse must appear after correct in the TSV list")
         elif n == "transcriptome":
+            # transcriptome requires align and optionally regionalize, but must
+            # NOT follow correct. Enforce align seen and no prior correct.
             if "align" not in seen:
-                raise ValueError("transcriptome must appear after align in the TSV list")
+                raise ValueError(
+                    "transcriptome must appear after align (optionally after regionalize) in the TSV list"
+                )
+            if "correct" in seen:
+                raise ValueError(
+                    "transcriptome cannot follow correct; remove 'correct' or place 'transcriptome' before it"
+                )
         elif n == "combine":
             if ("collapse" not in seen and "transcriptome" not in seen) and not _has_manifest_flag(st):
                 raise ValueError(
@@ -67,4 +83,3 @@ def validate_stage_order(cfg: Config) -> None:
                 )
 
         seen.add(n)
-
