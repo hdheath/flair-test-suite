@@ -1,0 +1,10 @@
+[[run.stages]]
+name = "quantify"
+
+[run.stages.flags]
+# Required: reads manifest (sample\tcondition\tbatch\treads.fq)
+# You can copy and edit: config/templates/quantify_reads_manifest_template.tsv
+manifest = "reads_manifest.tsv"
+
+# Ordering: place this after the stage producing isoform FASTA (combine,
+# transcriptome, or collapse).

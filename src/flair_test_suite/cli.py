@@ -12,6 +12,7 @@ import click
 from .config_loader import load_config, load_config_fragments
 from .config_schema import Config
 from .stages import STAGE_REGISTRY
+from .validation import validate_stage_order
 from .lib import topological_sort
 from .lib.logging import setup_run_logging
 from .lib.paths import PathBuilder, format_path
@@ -35,11 +36,12 @@ def _iter_config_paths(tsv_path: Path) -> Iterator[Path]:
 
 
 def parse_cases_tsv(tsv_path: Path) -> Iterator[Config]:
-    """Yield Config objects assembled from a TSV manifest.
+    """Yield Config objects assembled from a TSV manifest (base-first only).
 
-    Each non-empty line must contain at least a run ID and base config path
-    followed by zero or more stage config paths. Paths are resolved relative
-    to the TSV location.
+    Required row format (tab-separated, paths resolved relative to the TSV):
+        base_config.toml\tstage1.toml\tstage2.toml\t...
+
+    The base config must define test_set_id (preferred) or legacy run_id.
     """
     with tsv_path.open() as fh:
         reader = csv.reader(fh, delimiter="\t")
@@ -49,10 +51,9 @@ def parse_cases_tsv(tsv_path: Path) -> Iterator[Config]:
             if row[0].startswith("#"):
                 continue
             if len(row) < 2:
-                raise ValueError("Each row must have run_id and base config path")
-            run_id = row[0].strip()
-            base_rel = row[1].strip()
-            stage_rel = [c.strip() for c in row[2:] if c.strip()]
+                raise ValueError("Each TSV row must have at least a base config and one stage config")
+            first = row[0].strip()
+            rest = [c.strip() for c in row[1:] if c.strip()]
 
             def _resolve(p: str) -> Path:
                 path = Path(p)
@@ -60,11 +61,27 @@ def parse_cases_tsv(tsv_path: Path) -> Iterator[Config]:
                     path = (tsv_path.parent / path).resolve()
                 return path
 
-            base_path = _resolve(base_rel)
-            stage_paths = [_resolve(p) for p in stage_rel]
-
+            base_path = _resolve(first)
+            if not base_path.exists() or base_path.suffix.lower() != ".toml":
+                raise ValueError(
+                    f"First column must be a TOML base config; got '{first}'"
+                )
+            stage_paths = [_resolve(p) for p in rest]
+            if not stage_paths:
+                raise ValueError(
+                    "Each row must include at least one stage fragment after the base config"
+                )
             cfg = load_config_fragments(base_path, stage_paths)
-            cfg.run_id = run_id
+            rid = (
+                getattr(cfg, "test_set_id", None)
+                or getattr(cfg.run, "test_set_id", None)
+                or getattr(cfg, "run_id", None)
+                or getattr(cfg.run, "run_id", None)
+            )
+            if not rid:
+                raise ValueError(
+                    f"Base config '{base_path}' is missing test_set_id; add test_set_id under the top-level or [run] section (run_id also accepted for legacy configs)."
+                )
             yield cfg
 
 
@@ -78,11 +95,8 @@ def _load_cfg(cfg_path: Path):
 
 
 def _prepare_logfile(cfg, run_id: str, work_dir: Path, seen_run_ids: set, quiet: bool) -> Path:
-    case_name = getattr(cfg, "case_name", None)
-    log_dir = work_dir
-    if case_name:
-        log_dir = log_dir / case_name
-    log_dir = log_dir / run_id
+    # Logs are written under <work_dir>/<run_id>/run_summary.log
+    log_dir = work_dir / run_id
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "run_summary.log"
     mode = "a" if run_id in seen_run_ids else "w"
@@ -159,16 +173,31 @@ def run_configs(
             cfg = item
             cfg_path = getattr(cfg, "_path", "<tsv>")
 
-        run_id = getattr(cfg, "run_id", None) or getattr(cfg.run, "run_id", None)
-        work_dir = Path(cfg.run.work_dir)
+        # Determine identifier: prefer test_set_id, fall back to legacy run_id
+        run_id = (
+            getattr(cfg, "test_set_id", None)
+            or getattr(cfg.run, "test_set_id", None)
+            or getattr(cfg, "run_id", None)
+            or getattr(cfg.run, "run_id", None)
+        )
+        # Hardcode work_dir to ./outputs regardless of config
+        work_dir = Path("./outputs")
         log_path = _prepare_logfile(cfg, run_id, work_dir, seen_run_ids, quiet=True)
         logger.info("Loading config: %s", cfg_path)
 
+        # Validate TSV ordering and duplicates before attempting to run
+        try:
+            validate_stage_order(cfg)
+        except Exception as e:
+            click.echo(f"Invalid stage order: {e}", err=True)
+            logger.error("Invalid stage order: %s", e)
+            any_failed = True
+            continue
+
         stage_order = topological_sort(cfg.run.stages)
         upstreams: Dict[str, PathBuilder] = {}
-        click.echo(f"Starting run '{run_id}' with {len(stage_order)} stage(s)")
+        # Print a single concise stdout message listing the stages to be executed
         click.echo(f"Run summary: {click.style(str(log_path), fg='cyan')}")
-        # Also print a concise stdout message listing the stages to be executed
         try:
             stage_names = [st_cfg.name for st_cfg in stage_order]
         except Exception:
@@ -217,17 +246,9 @@ def run_configs(
 def main(config_input: Path, absolute_paths: bool) -> None:
     """Entry point for the CLI."""
     if config_input.suffix.lower() in (".tsv", ".txt"):
-        lines = [
-            l
-            for l in config_input.read_text().splitlines()
-            if l.strip() and not l.startswith("#")
-        ]
-        if lines and lines[0].count("\t") >= 2:
-            inputs = list(parse_cases_tsv(config_input))
-        else:
-            inputs = list(_iter_config_paths(config_input))
+        inputs = list(parse_cases_tsv(config_input))
     else:
-        inputs = [config_input]
+        raise click.UsageError("Only TSV manifests are supported. Provide a TSV with: base_config\tstage1\tstage2...")
     sys.exit(run_configs(inputs, absolute_paths))
 
 

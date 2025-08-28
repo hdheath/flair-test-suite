@@ -11,6 +11,7 @@ import base64         # optionally available for encoding, not used here
 from datetime import datetime, timezone  # for timestamping markers
 import platform       # to record host information in markers
 from pathlib import Path  # for filesystem path operations
+import logging
 
 # Import PathBuilder to know where to write marker files
 from .paths import PathBuilder
@@ -120,33 +121,35 @@ def is_complete(
     # 1) Marker must exist
     marker = stage_dir / ".completed.json"
     if not marker.exists():
-        print(f"[DEBUG] Marker file missing: {marker}")
+        logging.getLogger(__name__).debug("Marker file missing: %s", marker)
         return False
 
     # 2) Each expected output file must exist
     for p in outputs:
         if not p.exists():
-            print(f"[DEBUG] Expected output missing: {p}")
+            logging.getLogger(__name__).debug("Expected output missing: %s", p)
             return False
 
     # 3) If QC is required, ensure TSV and QC block are present
     if needs_qc:
         qc_tsv = qc_sidecar_path(stage_dir, stage_dir.name)
         if not qc_tsv.exists():
-            print(f"[DEBUG] QC TSV missing: {qc_tsv}")
+            logging.getLogger(__name__).debug("QC TSV missing: %s", qc_tsv)
             return False
         # Load marker JSON and verify 'qc' key has content
         try:
             marker_json = load_marker(stage_dir)
-            print(f"[DEBUG] Loaded marker JSON: {marker_json} (type: {type(marker_json)})")
+            logging.getLogger(__name__).debug(
+                "Loaded marker JSON: %s (type: %s)", marker_json, type(marker_json)
+            )
         except Exception as e:
-            print(f"[DEBUG] Error loading marker JSON: {e}")
+            logging.getLogger(__name__).debug("Error loading marker JSON: %s", e)
             return False
         if not isinstance(marker_json, dict):
-            print(f"[DEBUG] Marker JSON is not a dict: {marker_json}")
+            logging.getLogger(__name__).debug("Marker JSON is not a dict: %s", marker_json)
             return False
         if not marker_json.get("qc"):
-            print(f"[DEBUG] Marker JSON missing 'qc' block: {marker_json}")
+            logging.getLogger(__name__).debug("Marker JSON missing 'qc' block: %s", marker_json)
             return False
 
     return True

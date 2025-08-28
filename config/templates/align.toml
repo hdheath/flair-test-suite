@@ -1,0 +1,5 @@
+[[run.stages]]
+name = "align"
+
+[run.stages.flags]
+# Add align flags here (e.g., nvrna = true, quality = 0). Leave empty for defaults.

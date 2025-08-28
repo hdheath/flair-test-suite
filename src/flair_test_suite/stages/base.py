@@ -168,6 +168,11 @@ class StageBase(ABC):
         decision = Reinstate.decide(
             stage_dir, primary, needs_qc=needs_qc, stage_name=self.name
         )
+        # Safety: if the completion marker is missing, force a full rerun
+        # even if Reinstate suggested QC-only. This ensures a fresh marker
+        # and consistent metadata are written.
+        if decision == "qc" and not (stage_dir / ".completed.json").exists():
+            decision = "run"
         if decision == "run":
             if primary.exists():
                 self.logger.warning(
@@ -406,4 +411,3 @@ class StageBase(ABC):
             )
             raise RuntimeError(f"{self.name} failed with exit code {proc.returncode}")
         return proc.returncode
-

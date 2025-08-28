@@ -1,0 +1,9 @@
+[[run.stages]]
+name = "combine"
+
+[run.stages.flags]
+# Provide an existing manifest to append to (optional).
+# You can copy and edit: config/templates/combine_manifest_template.tsv
+# manifest = "combine_manifest.tsv"
+ # Ordering: ensure this appears after the stage(s) producing isoforms
+ # (collapse and/or transcriptome) so outputs exist.

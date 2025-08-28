@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import time
 import warnings
+import logging
 from collections import defaultdict, Counter
 from pathlib import Path
 from statistics import mean, median
@@ -15,6 +16,7 @@ from . import register, write_metrics
 from .qc_utils import count_lines, parse_gtf_attributes
 
 __all__ = ["collect"]
+logger = logging.getLogger(__name__)
 
 # ───────────────────────── GTF helpers ────────────────────────────────
 
@@ -142,7 +144,8 @@ def collect(
     import pandas as pd
 
     t0 = time.time()
-    details_path = out_dir / "region_details.tsv"
+    base_dir = out_dir / "qc" / "regionalize"
+    details_path = base_dir / "region_details.tsv"
     if not details_path.exists():
         raise FileNotFoundError(f"Missing region details: {details_path}")
 
@@ -171,19 +174,20 @@ def collect(
 
             # Write per-region summaries
             if gene_rows:
-                gene_csv = out_dir / f"{region_tag}_gene_summary.csv"
+                gene_csv = base_dir / f"{region_tag}_gene_summary.csv"
                 with open(gene_csv, "w", newline="") as fh:
                     w = csv.DictWriter(fh, fieldnames=gene_rows[0].keys())
                     w.writeheader()
                     w.writerows(gene_rows)
             if tx_rows:
-                tx_csv = out_dir / f"{region_tag}_transcript_summary.csv"
+                tx_csv = base_dir / f"{region_tag}_transcript_summary.csv"
                 with open(tx_csv, "w", newline="") as fh:
                     w = csv.DictWriter(fh, fieldnames=tx_rows[0].keys())
                     w.writeheader()
                     w.writerows(tx_rows)
         else:
-            warnings.warn(f"No GTF for region {region_tag}", UserWarning)
+            # Log the warning so it appears in the run summary, not stdout
+            logger.warning("No GTF for region %s", region_tag)
 
         bed_lines = _count_lines_for_region(bed, chrom, start, end, 1, 2, True) if bed.exists() else 0
 
@@ -218,7 +222,7 @@ def collect(
             row.setdefault(k, 0)
 
     # write region_metrics.tsv
-    metrics_path = out_dir / "region_metrics.tsv"
+    metrics_path = base_dir / "region_metrics.tsv"
     with open(metrics_path, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=keys, delimiter="\t")
         w.writeheader()

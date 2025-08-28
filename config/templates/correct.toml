@@ -1,0 +1,10 @@
+[[run.stages]]
+name = "correct"
+
+[run.stages.flags]
+# Put any correct flags here. For FLAIR >= 3, genome is not required.
+
+# Note on ordering:
+# - If your workflow includes regionalize, list 'config/stages/regionalize.toml'
+#   before this file in your TSV so correct runs per-region.
+# - In general, TSV order defines execution for peers when no 'requires' are set.

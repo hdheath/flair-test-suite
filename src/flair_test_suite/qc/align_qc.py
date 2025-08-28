@@ -31,6 +31,7 @@ import subprocess
 import tempfile
 import time
 from statistics import mean, median
+import logging
 
 # Import utilities for QC: sidecar path, marker loading, registration, metrics write
 import pysam  # noqa: E402
@@ -140,7 +141,9 @@ def collect(
         )
     except Exception as e:
         motif_counts = {}
-        print(f"Warning: Splice junction motif counting failed: {e}")
+        logging.getLogger(__name__).warning(
+            "Splice junction motif counting failed: %s", e
+        )
     motif_counts_str = {f"{k[0]}:{k[1]}": v for k, v in motif_counts.items()}
     with open(qc_dir / "splice_site_motifs.json", "w") as fh:
         json.dump(motif_counts_str, fh, indent=2)

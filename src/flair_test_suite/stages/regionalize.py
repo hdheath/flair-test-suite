@@ -126,10 +126,11 @@ class RegionalizeStage(StageBase):
 
         cmds: List[List[str]] = []
 
-        # region_details.tsv (primary)
+        # region_details.tsv (primary) under qc/regionalize
         header = "chrom\tstart\tend\tspan_bp"
         body = "\n".join(f"{c}\t{s}\t{e}\t{e - s + 1}" for c, s, e in self._regions)
-        heredoc = f"cat > region_details.tsv << 'EOF'\n{header}\n{body}\nEOF"
+        cmds.append(["bash", "-lc", "mkdir -p qc/regionalize"])
+        heredoc = f"cat > qc/regionalize/region_details.tsv << 'EOF'\n{header}\n{body}\nEOF"
         cmds.append(["bash", "-lc", heredoc])
 
         # Per-region artifacts
@@ -224,5 +225,6 @@ class RegionalizeStage(StageBase):
             "region_bed": Path("{chrom}_{start}_{end}.bed"),
             "region_gtf": Path("{chrom}_{start}_{end}.gtf"),
             "region_fa": Path("{chrom}_{start}_{end}.fa"),
-            "region_details": Path("region_details.tsv"),
+            # Primary now lives under qc/regionalize
+            "region_details": Path("qc/regionalize/region_details.tsv"),
         }

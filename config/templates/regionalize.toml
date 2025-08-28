@@ -1,0 +1,7 @@
+[[run.stages]]
+name = "regionalize"
+
+[run.stages.flags]
+# Optionally override input BED (defaults to align BED):
+# bed = "path/to/override.bed"
+# Ordering: ensure this appears after align in your TSV.

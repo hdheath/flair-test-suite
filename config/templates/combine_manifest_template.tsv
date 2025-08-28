@@ -1,0 +1,12 @@
+# Combine manifest (TSV)
+# Columns: sample\ttype\tbed\tfasta\tread_map
+# - 'sample' must be a numeric identifier (1, 2, 3, ...)
+# - 'type' typically 'isoform'
+# - 'bed' is required (path to *.isoforms.bed)
+# - 'fasta' and 'read_map' are optional; leave blank if unavailable
+# - Paths may be absolute or relative to the base config's data_dir
+#
+# Examples:
+# 1\tisoform\ttranscripts/collapse_run1.isoforms.bed\ttranscripts/collapse_run1.isoforms.fa\ttranscripts/collapse_run1.isoform.read.map.txt
+# 2\tisoform\tother_run.isoforms.bed\t\t
+

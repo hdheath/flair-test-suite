@@ -1,4 +1,5 @@
 import logging
+import warnings
 from pathlib import Path
 
 
@@ -21,3 +22,11 @@ def setup_run_logging(log_path: Path, mode: str = "a", quiet: bool = False) -> N
         handlers=handlers,
     )
 
+    # Route Python warnings (warnings.warn) into the logging system so they
+    # respect 'quiet' and land in the run summary log instead of stderr.
+    logging.captureWarnings(True)
+    # Optionally, downgrade noisy deprecation warnings
+    try:
+        warnings.filterwarnings("default")
+    except Exception:
+        pass

@@ -1,0 +1,10 @@
+# Quantify reads manifest (TSV)
+# Columns: sample\tcondition\tbatch\treads.fq[.gz]
+# - One row per FASTQ file used for expression quantification
+# - 'sample' must be a unique string per row
+# - Paths may be absolute or relative to the base config's data_dir
+#
+# Examples:
+# sampleA\tctrl\tbatch1\t/path/to/sampleA_reads.fastq
+# sampleB\ttreat\tbatch1\t/path/to/sampleB_reads.fastq
+

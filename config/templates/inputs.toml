@@ -1,0 +1,27 @@
+# ------------------------------------------------------------------------------------------------------------
+# Inputs (shared, no stages)
+# ------------------------------------------------------------------------------------------------------------
+# Provide test_set_id here when using the TSV format (no run_id column).
+test_set_id = ""   # e.g., "WTC11" (required)
+
+# Note: outputs live under <work_dir>/<test_set_id> and logs under the same.
+
+[run]
+version    = ""        # flair version, e.g. "3.0.0"
+conda_env  = ""        # conda env with FLAIR, e.g. "flair"
+
+# Shared inputs (resolved relative to data_dir unless absolute)
+data_dir   = ""        # directory containing all input data
+reads_file = ""        # FASTA/Q or comma/list of files; gz ok
+genome_fa  = ""        # reference genome FASTA
+gtf        = ""        # annotation GTF (required for regionalize)
+regions_tsv = ""       # 3-column TSV (chr start end) for regionalize
+
+# Optional shared inputs
+junctions = ""                                        # STAR SJ.out.tab (optional)
+experiment_5_prime_regions_bed_file = ""              # required for TED QC
+experiment_3_prime_regions_bed_file = ""              # required for TED QC
+reference_5_prime_regions_bed_file  = ""              # required for TED QC
+reference_3_prime_regions_bed_file  = ""              # required for TED QC
+
+# Note: TED QC requires all four *_prime* BEDs above under [run]. Outputs are always written to ./outputs.

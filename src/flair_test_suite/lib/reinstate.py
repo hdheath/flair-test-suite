@@ -82,6 +82,11 @@ class Reinstate:
             files = []
         logger.info(f"  All files in {stage_dir}: {files}")
 
+        # If the completion marker is missing, force a rerun to regenerate
+        # commands, outputs and a fresh marker, even if primary exists.
+        if not marker_ok:
+            return "run"
+
         if marker_ok and primary_ok and qc_ok:
             return "skip"
 
@@ -89,4 +94,3 @@ class Reinstate:
             return "qc"
 
         return "run"
-

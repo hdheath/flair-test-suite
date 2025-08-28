@@ -1,0 +1,13 @@
+[[run.stages]]
+name = "collapse"
+
+[run.stages.flags]
+# Add collapse flags here. --generate_map is added automatically by the harness.
+# Ordering: place this after 'correct'.
+
+# Optional QC blocks can live here and will be merged:
+[qc.collapse.TED]
+# window = 50
+
+[qc.collapse.SQANTI]
+# conda_env = "sqanti"

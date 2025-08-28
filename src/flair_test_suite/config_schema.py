@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 
 def _split_commas_preserve_escapes(s: str) -> List[str]:
-    """
+    r"""
     Split on commas, allowing escaped commas '\,' inside paths.
     Examples:
       "a.fq,b.fq"          -> ["a.fq", "b.fq"]
@@ -32,7 +32,7 @@ class StageConfig(BaseModel):
 class RunConfig(BaseModel):
     version: str
     conda_env: str
-    work_dir: str
+    work_dir: str = "./outputs"
     data_dir: str
 
     # Accept str or list[str]; normalize to list[str]
@@ -86,7 +86,11 @@ class RunConfig(BaseModel):
     stages: List[StageConfig]
 
 class Config(BaseModel):
+    # Preferred identifier for a test case
+    test_set_id: Optional[str] = None
+    # Legacy field supported for backward compatibility
     run_id: Optional[str] = None
+    # case_name is deprecated; retained for lenient parsing but unused
     case_name: Optional[str] = None
     run: RunConfig
     qc: Dict[str, Any] = Field(default_factory=dict)

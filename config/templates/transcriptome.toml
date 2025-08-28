@@ -1,0 +1,13 @@
+[[run.stages]]
+name = "transcriptome"
+
+[run.stages.flags]
+# Add transcriptome flags here.
+# Ordering: place this after 'align' (or after 'regionalize' if using regionalized path).
+
+# Optional QC blocks can live here and will be merged:
+[qc.transcriptome.TED]
+# window = 50
+
+[qc.transcriptome.SQANTI]
+# conda_env = "sqanti"
