@@ -32,7 +32,6 @@ class StageConfig(BaseModel):
 class RunConfig(BaseModel):
     version: str
     conda_env: str
-    work_dir: str = "./outputs"
     data_dir: str
 
     # Accept str or list[str]; normalize to list[str]
@@ -79,6 +78,9 @@ class RunConfig(BaseModel):
     gtf: Optional[str] = None
     regions_tsv: Optional[str] = None
     junctions: Optional[str] = None
+    # Optional tool-specific settings
+    sqanti_env: Optional[str] = None
+    sqanti_cpus: Optional[int] = None
     experiment_5_prime_regions_bed_file: Optional[str] = None
     experiment_3_prime_regions_bed_file: Optional[str] = None
     reference_5_prime_regions_bed_file: Optional[str] = None

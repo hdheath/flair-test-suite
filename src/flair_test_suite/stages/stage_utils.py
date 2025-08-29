@@ -292,6 +292,8 @@ def isoform_expected_outputs(run_id: str, first_tag: str | None, regionalized: b
 
 
 def run_ted_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
+    # Run TED automatically for collapse/transcriptome; gracefully no-op if
+    # required data are unavailable.
     try:
         from ..qc.ted import collect as ted_collect
         import json

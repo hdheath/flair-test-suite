@@ -5,9 +5,12 @@ name = "collapse"
 # Add collapse flags here. --generate_map is added automatically by the harness.
 # Ordering: place this after 'correct'.
 
-# Optional QC blocks can live here and will be merged:
-[qc.collapse.TED]
-# window = 50
+# Optional QC notes:
+# - TED runs automatically with a fixed window of 50 (no block needed). Providing
+#   peak BEDs under [run] enables precision/recall; otherwise those metrics are None.
+# - SQANTI runs automatically when available (conda env named 'sqanti' or entrypoint
+#   on PATH). Use the block below only to override env name or CPUs.
 
 [qc.collapse.SQANTI]
-# conda_env = "sqanti"
+# conda_env = "sqanti"   # override env name if not 'sqanti'
+# cpus = 8

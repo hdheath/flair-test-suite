@@ -345,33 +345,28 @@ def _synthesize_mapping_from_map_and_bam(
     return out_p
 
 
-def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, str], int]:
+def _build_peaks_cfg(cfg, stage_name: str) -> Tuple[Dict[str, Optional[str]], int]:
     """Collect peak file configuration for a stage.
 
-    TSS/TTS peak BED files are now sourced exclusively from the shared
-    run-level inputs.  ``experiment_*`` and ``reference_*`` keys are required
-    under ``[run]`` and no longer honored from ``[qc.<stage>.TED]`` blocks or
-    per-stage flags.  ``window`` may still be overridden under the QC block.
+    Simplified behavior:
+    - Activation of TED is controlled by the presence of a `[qc.<stage>.TED]` block.
+    - Window is fixed to 50 (ignores any override keys).
+    - Peak BED files are optional. If any are missing, precision/recall metrics
+      for that side will be None, but other metrics are still produced.
     """
 
-    qc_block = _cfg_get(cfg, ["qc", stage_name, "TED"], {}) or {}
-    window = int(qc_block.get("window", 50))
+    # Hard-code window to 50 regardless of configuration
+    window = 50
 
     run_cfg = getattr(cfg, "run", None)
-    peaks_cfg = {
+    peaks_cfg: Dict[str, Optional[str]] = {
         "prime5": getattr(run_cfg, "experiment_5_prime_regions_bed_file", None) if run_cfg else None,
         "prime3": getattr(run_cfg, "experiment_3_prime_regions_bed_file", None) if run_cfg else None,
         "ref_prime5": getattr(run_cfg, "reference_5_prime_regions_bed_file", None) if run_cfg else None,
         "ref_prime3": getattr(run_cfg, "reference_3_prime_regions_bed_file", None) if run_cfg else None,
     }
 
-    missing = [k for k, v in peaks_cfg.items() if not v]
-    if missing:
-        raise RuntimeError(
-            "TSS/TTS peak BED files must be provided under [run]; missing: "
-            + ", ".join(missing)
-        )
-
+    # Do not enforce presence; missing files are handled downstream with warnings
     return peaks_cfg, window
 
 
@@ -910,26 +905,22 @@ def collect(
         logging.debug(f"[TED] Single mode - n_iso: {n_iso}, n_genes_obs: {n_genes_obs}, assigned_reads: {assigned_reads}")
 
         # peaks: global only
-        peaks = {}
-        missing_peaks = []
+        peaks: Dict[str, Optional[Path]] = {}
+        missing_peaks: List[str] = []
         logging.info(f"[TED] Looking for peak files in directory: {data_dir}")
         for key, conf in peaks_cfg.items():
             if not conf:
-                logging.error(f"[TED] Peaks config missing for key '{key}' in non-regionalized run; cannot proceed.")
-                missing_peaks.append(key)
+                logging.warning(f"[TED] Peaks config missing for key '{key}' in non-regionalized run; metrics will be None for this side.")
                 peaks[key] = None
                 continue
             rp = _resolve(conf, data_dir)
             logging.info(f"[TED] Resolving peak file for key '{key}': config='{conf}', resolved='{rp}'")
             if not (rp and rp.exists() and rp.stat().st_size > 0):
-                logging.error(f"[TED] Peaks file for key '{key}' not found at {rp}; required for non-regionalized run.")
-                missing_peaks.append(key)
+                logging.warning(f"[TED] Peaks file for key '{key}' not found at {rp}; metrics will be None for this side.")
                 peaks[key] = None
             else:
                 peaks[key] = rp
         logging.debug("[TED] Single mode peaks resolved: %s", {k: str(v) if v else None for k, v in peaks.items()})
-        if missing_peaks:
-            raise RuntimeError(f"[TED] Required peak files missing for keys: {', '.join(missing_peaks)}. Aborting non-regionalized run.")
         tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, "single")
 
         if stage_name == "collapse":
@@ -1001,7 +992,8 @@ def collect(
         "assigned_primary_reads_total": assigned_total,
         "tsv": str(out_tsv),
     }
-    write_metrics(out_dir, "TED", metrics)
+    # Write sidecar metrics at the stage root under qc/ted/TED_qc.tsv
+    write_metrics(stage_dir, "TED", metrics)
     logging.info(f"[TED] Sidecar metrics written: {metrics}")
 
     if browser_paths:

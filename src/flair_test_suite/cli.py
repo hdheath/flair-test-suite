@@ -41,7 +41,7 @@ def parse_cases_tsv(tsv_path: Path) -> Iterator[Config]:
     Required row format (tab-separated, paths resolved relative to the TSV):
         base_config.toml\tstage1.toml\tstage2.toml\t...
 
-    The base config must define test_set_id (preferred) or legacy run_id.
+    The base config must define test_set_id.
     """
     with tsv_path.open() as fh:
         reader = csv.reader(fh, delimiter="\t")
@@ -85,7 +85,7 @@ def parse_cases_tsv(tsv_path: Path) -> Iterator[Config]:
             )
             if not rid:
                 raise ValueError(
-                    f"Base config '{base_path}' is missing test_set_id; add test_set_id under the top-level or [run] section (run_id also accepted for legacy configs)."
+                    f"Base config '{base_path}' is missing test_set_id; add test_set_id under the top-level or [run] section."
                 )
             yield cfg
 
@@ -117,7 +117,6 @@ def _execute_stage(
     run_id: str,
     work_dir: Path,
     upstreams: Dict[str, PathBuilder],
-    absolute_paths: bool,
 ) -> Tuple[bool, bool]:
     """Execute one stage. Returns (failed, skipped)."""
     StageCls = STAGE_REGISTRY[st_cfg.name]
@@ -140,8 +139,8 @@ def _execute_stage(
         upstreams[st_cfg.name] = pb
         skipped = getattr(stage_instance, "action", None) == "skip"
         if pb is not None:
-            path_root = None if absolute_paths else work_dir
-            out_path = format_path(pb.stage_dir, path_root)
+            # Always display paths relative to the work_dir for readability
+            out_path = format_path(pb.stage_dir, work_dir)
             logger.info("\u2713 Done %s – outputs: %s", st_cfg.name, out_path)
         else:
             logger.warning("Stage %s produced no outputs.", st_cfg.name)
@@ -156,7 +155,7 @@ def _execute_stage(
 
 # ────────────────────────── main orchestration ──────────────────────────
 def run_configs(
-    inputs: Iterable[Union[Path, Config]], absolute_paths: bool = False
+    inputs: Iterable[Union[Path, Config]]
 ) -> int:
     """Run one or more configuration files and return an exit code."""
 
@@ -178,7 +177,7 @@ def run_configs(
             cfg = item
             cfg_path = getattr(cfg, "_path", "<tsv>")
 
-        # Determine identifier: prefer test_set_id, fall back to legacy run_id
+        # Determine identifier from test_set_id
         run_id = (
             getattr(cfg, "test_set_id", None)
             or getattr(cfg.run, "test_set_id", None)
@@ -218,7 +217,7 @@ def run_configs(
         all_skipped = True
         for st_cfg in stage_order:
             failed, skipped = _execute_stage(
-                st_cfg, cfg, run_id, work_dir, upstreams, absolute_paths
+                st_cfg, cfg, run_id, work_dir, upstreams
             )
             if failed:
                 any_failed = True
@@ -249,12 +248,7 @@ def run_configs(
 
 @click.command()
 @click.argument("config_input", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--absolute-paths/--relative-paths",
-    default=False,
-    help="Show absolute paths in output",
-)
-def main(config_input: Path, absolute_paths: bool) -> None:
+def main(config_input: Path) -> None:
     """Entry point for the CLI."""
     if config_input.suffix.lower() in (".tsv", ".txt"):
         inputs = list(parse_cases_tsv(config_input))
@@ -268,7 +262,7 @@ def main(config_input: Path, absolute_paths: bool) -> None:
                 pass
     else:
         raise click.UsageError("Only TSV manifests are supported. Provide a TSV with: base_config\tstage1\tstage2...")
-    sys.exit(run_configs(inputs, absolute_paths))
+    sys.exit(run_configs(inputs))
 
 
 if __name__ == "__main__":  # pragma: no cover

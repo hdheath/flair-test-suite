@@ -165,14 +165,16 @@ class StageBase(ABC):
         return pb, outputs, primary, needs_qc
 
     def _decide_action(self, stage_dir: Path, primary: Path, needs_qc: bool) -> StageAction:
+        # Provide expected QC files for finer-grained reinstatement decisions
+        try:
+            qc_expected = self.expected_qc_files(stage_dir)
+        except Exception:
+            qc_expected = None
         decision = Reinstate.decide(
-            stage_dir, primary, needs_qc=needs_qc, stage_name=self.name
+            stage_dir, primary, needs_qc=needs_qc, stage_name=self.name, qc_expected=qc_expected
         )
-        # Safety: if the completion marker is missing, force a full rerun
-        # even if Reinstate suggested QC-only. This ensures a fresh marker
-        # and consistent metadata are written.
-        if decision == "qc" and not (stage_dir / ".completed.json").exists():
-            decision = "run"
+        # If Reinstate suggested QC-only, allow it even when the marker is
+        # missing; _handle_qc_only() will regenerate QC and write a fresh marker.
         if decision == "run":
             if primary.exists():
                 self.logger.warning(
@@ -190,6 +192,16 @@ class StageBase(ABC):
             raise ValueError(f"Unknown Reinstate decision: {decision}")
         self.logger.info("action: %s", result)
         return result
+
+    def expected_qc_files(self, stage_dir: Path) -> dict[str, Path] | None:
+        """
+        Return a mapping of label -> expected QC file paths for this stage.
+        Stages may override to provide multiple QC artifacts. The default
+        returns the single sidecar TSV when a QC collector is registered.
+        """
+        if self.name in QC_REGISTRY:
+            return {"sidecar": qc_sidecar_path(stage_dir, self.name)}
+        return None
 
     def _handle_skip(self, pb: PathBuilder) -> PathBuilder:
         self.logger.info("[SKIP] complete (sig=%s)", self.signature)

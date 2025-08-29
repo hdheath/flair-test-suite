@@ -1,3 +1,6 @@
+# align: Align reads to the reference genome
+# Needs: [run].genome_fa, [run].reads_file
+# Outputs: <test_set_id>_flair.{bam,bed} under outputs/<id>/align/<sig>/
 [[run.stages]]
 name = "align"
 

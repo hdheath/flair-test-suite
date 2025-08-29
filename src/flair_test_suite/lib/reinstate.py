@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Dict
 from .signature import qc_sidecar_path, load_marker
 
 # The three actions our state machine can return
@@ -24,7 +24,8 @@ class Reinstate:
     def decide(stage_dir: Path,
                primary: Path,
                needs_qc: bool,
-               stage_name: str) -> Action:
+               stage_name: str,
+               qc_expected: Dict[str, Path] | None = None) -> Action:
         """
         Parameters
         ----------
@@ -43,30 +44,20 @@ class Reinstate:
         marker_ok = marker_f.exists()
         primary_ok = primary.exists()
 
-        if needs_qc and stage_name in {"collapse", "transcriptome"}:
-            ted_tsv = stage_dir / "qc" / "ted" / "TED.tsv"
-            # Check for regionalized run by presence of region-tagged isoform beds
-            is_regionalized = any(stage_dir.glob("*_*_*.isoforms.bed"))
-            if is_regionalized:
-                browser_dir = stage_dir / "qc" / "ted" / "transcriptome_browser"
-                region_map = browser_dir / "region_map.json"
-                if region_map.exists():
-                    try:
-                        mapping = json.loads(region_map.read_text())
-                        browser_ok = all(Path(p).exists() for p in mapping.values())
-                    except Exception:
-                        browser_ok = False
+        if needs_qc:
+            # If the stage provided an explicit set of expected QC files, check all of them.
+            if qc_expected:
+                missing = [lbl for lbl, p in qc_expected.items() if not Path(p).exists()]
+                qc_ok = len(missing) == 0
+                if qc_ok:
+                    qc_desc = f"all expected QC outputs present ({len(qc_expected)})"
                 else:
-                    browser_ok = False
-                qc_ok = ted_tsv.exists() and browser_ok
-                qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}, browser plot {'found' if browser_ok else 'missing'}"
+                    qc_desc = "missing: " + ", ".join(missing)
             else:
-                qc_ok = ted_tsv.exists()
-                qc_desc = f"TED.tsv {'found' if ted_tsv.exists() else 'missing'}"
-        elif needs_qc:
-            qc_tsv = qc_sidecar_path(stage_dir, stage_name)
-            qc_ok = qc_tsv.exists()
-            qc_desc = f"{qc_tsv} exists? {qc_ok}"
+                # Fall back to a single sidecar TSV
+                qc_tsv = qc_sidecar_path(stage_dir, stage_name)
+                qc_ok = qc_tsv.exists()
+                qc_desc = f"{qc_tsv} exists? {qc_ok}"
         else:
             qc_ok = True
             qc_desc = "n/a"
@@ -82,9 +73,11 @@ class Reinstate:
             files = []
         logger.info(f"  All files in {stage_dir}: {files}")
 
-        # If the completion marker is missing, force a rerun to regenerate
-        # commands, outputs and a fresh marker, even if primary exists.
+        # If the completion marker is missing but the primary exists and only QC
+        # is missing, allow QC-only reinstatement when we have explicit QC expectations.
         if not marker_ok:
+            if primary_ok and needs_qc and not qc_ok and qc_expected:
+                return "qc"
             return "run"
 
         if marker_ok and primary_ok and qc_ok:

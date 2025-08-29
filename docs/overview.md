@@ -1,6 +1,6 @@
 # FLAIR Test Suite Overview
 
-This FLAIR test suite provides the means for running and benchmarking different versions of [FLAIR](https://github.com/BrooksLabUCSC/flair) **Ver. ≥ 2.0** long-read transcriptome analysis pipeline—including alignment, correction, collapse, transcriptome, and quantification. It is designed to support reproducible evaluation of transcript detection methods across a variety of organisms, sequencing protocols, and parameter configurations.
+This FLAIR test suite provides the means for running and benchmarking different versions of [FLAIR](https://github.com/BrooksLabUCSC/flair) **Ver. ≥ 2.0** long-read transcriptome analysis pipeline—including alignment, correction, collapse, transcriptome, and quantification. It is designed to support reproducible evaluation of transcript modeling methods across a variety of organisms, sequencing protocols, and parameter configurations.
 
 ## Contents
 
@@ -18,7 +18,7 @@ This FLAIR test suite provides the means for running and benchmarking different 
 | Term         | Definition                                                                                                                                                                                                                      |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test_case`  | A documented config file that contains reasoning and the blueprint for a complete FLAIR workflow from raw reads through FLAIR quantify with self-contained stage options at each step.                                         |
-| `run`        | An end-to-end execution of a `test_case` (identified by `run_id`).                                                                                                                                                                |
+| `run`        | An end-to-end execution of a `test_case` (identified by `test_set_id`).                                                                                                                                                          |
 | `stage`      | One FLAIR sub-command (`align`, `correct`, `regionalize`, `collapse`, `transcriptome`).                                                                                                                                                |
 | `flags`      | CLI options under `[run.stages.flags]`.                                                                                                                                                                                          |
 | `signature`  | The name of the directory under `<stage>` (e.g. `align/abcd1234`), based on the signature string <code>`tool_version \| flags \| input_hashes`</code>. Helps determine if a stage has already been completed and can be skipped. |
@@ -114,13 +114,13 @@ PNG plots and TSV metrics are saved next to each stage’s outputs.
 
 ## Output Layout
 
-Each stage saves output under `outputs/<run_id>/<stage>/<signature>/`
+Each stage saves output under `outputs/<test_set_id>/<stage>/<signature>/`.
 
 ### Example of Output Tree
 
 ```plaintext
 outputs/
-└── <run_id>/
+└── <test_set_id>/
     ├── run_summary.log
     ├── align/<sig>/
     ├── correct/<sig>/
@@ -128,6 +128,4 @@ outputs/
     ├── collapse/<sig>/
     └── transcriptome/<sig>/
 ```
-
-
 

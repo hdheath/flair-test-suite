@@ -35,7 +35,7 @@ which flair-test-suite  # should print path inside env
 
 ## Before Running the Test Suite
 
-* Users must already have downloaded the FLAIR conda env they would like to use.
+* Users must already have downloaded FLAIR in a conda env they would like to use.
 * All input data used for a run must be located in the same directory.
 
   * Tip: you can symlink large files to the input directory to avoid duplication.
@@ -44,47 +44,38 @@ which flair-test-suite  # should print path inside env
     # pseudo command to create a symbolic link instead of copying large files
     ln -s /path/to/shared/genome.fa /path/to/data_dir/genome.fa
     ```
-* Each configuration file must be created by the user.
-
-For help creating these, visit : 
-[Guide to Creating Configurations for Test Cases](docs/configurations.md)
 
 ---
 
 ## Running the Test Suite
 
-You can run individual test-cases or batch multiple configurations.
+Runs are defined by a TSV configuration file that points to TOML templates. Paths are resolved relative to the TSV file.
 
-### Single config
+1) Copy and edit `config/templates/inputs.toml` (base inputs).
+   - Set `test_set_id`.
+   - Fill `run.version`, `run.conda_env`, `run.data_dir`, `run.reads_file`, and any shared inputs (`gtf`, `regions_tsv`, `junctions`, TSS/TES BEDs).
+2) Choose stage templates from `config/templates/` and edit flags as needed:
+   - `align.toml`, `correct.toml`, optional `regionalize.toml`, then `collapse.toml` or `transcriptome.toml`.
+   - Optional downstream: `combine.toml`, `quantify.toml` (see configuration templates in the same folder).
 
-```bash
-flair-test-suite path/to/your_config.toml
-```
+For help creating these, visit:
+[Guide to Creating Configurations for Test Cases](docs/configurations.md)
 
-This will execute the workflow defined in `your_config.toml` and place results under `outputs/<run_id>/`.
-
-By default the run summary logs paths relative to the working directory. Use
-`--absolute-paths` if you prefer full paths:
-
-```bash
-flair-test-suite --absolute-paths path/to/your_config.toml
-```
-
-### Batch runs from a list of configs
-
-If you have many configs, create a text file listing each TOML path (one per line):
+3) Create a TSV configuration (one test case per line):
 
 ```text
-configs/demo.toml
-configs/sample1.toml
-configs/sample2.toml
+config/templates/inputs.toml	config/templates/align.toml	config/templates/correct.toml	config/templates/collapse.toml
 ```
 
-Then launch:
+4) Run the suite:
 
 ```bash
-flair-test-suite path/to/runs.txt
+flair-test-suite path/to/cases.tsv
 ```
+
+Notes:
+- Outputs always write to `./outputs/<test_set_id>/`. A `run_summary.log` is created per test set.
+- For targeted region runs, add `regionalize.toml` and provide a 3-column region TSV (see `config/templates/region_template.tsv`).
 
 ---
 
@@ -97,4 +88,3 @@ flair-test-suite path/to/runs.txt
 Further details: [FLAIR Test Suite Overview](docs/overview.md)
 
 Happy testing 🚀
-

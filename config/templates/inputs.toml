@@ -1,10 +1,10 @@
 # ------------------------------------------------------------------------------------------------------------
 # Inputs (shared, no stages)
 # ------------------------------------------------------------------------------------------------------------
-# Provide test_set_id here when using the TSV format (no run_id column).
+# Provide test_set_id here for identifying the test case.
 test_set_id = ""   # e.g., "WTC11" (required)
 
-# Note: outputs live under <work_dir>/<test_set_id> and logs under the same.
+# Outputs are always written under ./outputs/<test_set_id>/ with a run_summary.log in the same folder.
 
 [run]
 version    = ""        # flair version, e.g. "3.0.0"
@@ -17,11 +17,14 @@ genome_fa  = ""        # reference genome FASTA
 gtf        = ""        # annotation GTF (required for regionalize)
 regions_tsv = ""       # 3-column TSV (chr start end) for regionalize
 
+# If provided, SQANTI QC will run automatically using this environment.
+sqanti_env  = ""       # e.g., "sqanti" (preferred conda env name for SQANTI)
+
 # Optional shared inputs
 junctions = ""                                        # STAR SJ.out.tab (optional)
-experiment_5_prime_regions_bed_file = ""              # required for TED QC
-experiment_3_prime_regions_bed_file = ""              # required for TED QC
-reference_5_prime_regions_bed_file  = ""              # required for TED QC
-reference_3_prime_regions_bed_file  = ""              # required for TED QC
+experiment_5_prime_regions_bed_file = ""              # optional for TED QC (enables precision/recall if provided)
+experiment_3_prime_regions_bed_file = ""              # optional for TED QC (enables precision/recall if provided)
+reference_5_prime_regions_bed_file  = ""              # optional for TED QC (enables precision/recall if provided)
+reference_3_prime_regions_bed_file  = ""              # optional for TED QC (enables precision/recall if provided)
 
-# Note: TED QC requires all four *_prime* BEDs above under [run]. Outputs are always written to ./outputs.
+# Note: TED QC runs automatically for collapse/transcriptome stages. Peak BEDs above are optional; without them, precision/recall are None.

@@ -76,9 +76,7 @@ def _run_sqanti(
     out_dir: Path,
     log_dir: Path,
 ) -> None:
-    # Prefer invoking the package via `python -m` inside the conda env to avoid
-    # relying on an installed entrypoint script. If that fails with command not
-    # found, fall back to running the entrypoint through a shell.
+    # Build command via conda run in the specified environment
     cmd = [
         "conda",
         "run",
@@ -100,13 +98,12 @@ def _run_sqanti(
 
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "sqanti.log"
-    # run and capture output; if returncode indicates command not found (127),
-    # try a shell fallback. Surface helpful log excerpt on failure.
+    # run and capture output; if conda invocation fails with 127, try a shell fallback
     try:
         with open(log_path, "w") as lf:
             subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, check=True)
     except subprocess.CalledProcessError as e:
-        # If the python -m invocation failed with code 127, try a shell entrypoint
+        # If the conda invocation failed with code 127, try a shell entrypoint
         if e.returncode == 127:
             logger.warning(f"[SQANTI] python -m invocation failed (rc=127); attempting shell fallback for env '{env}'")
             shell_cmd = (
@@ -241,14 +238,22 @@ def collect(stage_dir: Path, cfg, upstreams=None, *, out_dir: Optional[Path] = N
     """
     stage_name = stage_dir.parent.name
     qc_block = getattr(cfg, "qc", {}).get(stage_name, {}).get("SQANTI", {})
-    env = qc_block.get("conda_env") if isinstance(qc_block, dict) else None
+    # Determine env: prefer run-level sqanti_env, else QC block conda_env, else default 'sqanti' if it exists
+    env = getattr(getattr(cfg, "run", object()), "sqanti_env", None)
+    if not env and isinstance(qc_block, dict):
+        env = qc_block.get("conda_env")
+    if not env and _conda_env_exists("sqanti"):
+        env = "sqanti"
     if not env:
-        logger.info("[SQANTI] conda_env not configured; skipping")
+        logger.info("[SQANTI] No conda env configured/found; skipping")
         return
     if not _conda_env_exists(env):
         logger.warning(f"[SQANTI] conda env '{env}' not found; skipping")
         return
-    cpus = int(qc_block.get("cpus", 1)) if isinstance(qc_block, dict) else 1
+    cpus = (
+        int(getattr(getattr(cfg, "run", object()), "sqanti_cpus", 0))
+        or (int(qc_block.get("cpus", 4)) if isinstance(qc_block, dict) else 4)
+    )
 
     data_dir = Path(cfg.run.data_dir)
     ref_gtf = stage_utils.resolve_path(cfg.run.gtf, data_dir=data_dir)
@@ -304,5 +309,6 @@ def collect(stage_dir: Path, cfg, upstreams=None, *, out_dir: Optional[Path] = N
             plot_summary(str(out_tsv), out_dir)
         except Exception as e:  # pragma: no cover - best effort
             logger.warning(f"[SQANTI] plot failed: {e}")
-    write_metrics(out_dir, "SQANTI", {"tsv": str(out_tsv)})
+    # Write sidecar metrics at the stage root under qc/sqanti/SQANTI_qc.tsv
+    write_metrics(stage_dir, "SQANTI", {"tsv": str(out_tsv)})
     logger.info("[SQANTI] QC complete")

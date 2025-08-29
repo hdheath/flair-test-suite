@@ -1,7 +1,10 @@
+# regionalize: Subset reads/transcripts to genomic regions (3-col TSV)
+# Needs: [run].gtf and [run].regions_tsv (chr\tstart\tend)
+# Outputs per region: {tag}.bam(.bai), {tag}.bed, {tag}.gtf; index at qc/regionalize/region_details.tsv
 [[run.stages]]
 name = "regionalize"
 
 [run.stages.flags]
 # Optionally override input BED (defaults to align BED):
 # bed = "path/to/override.bed"
-# Ordering: ensure this appears after align in your TSV.
+# Ordering: after align

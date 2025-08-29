@@ -1,10 +1,10 @@
+# correct: Correct splice junctions from upstream alignment (per-region when regionalized)
+# Consumes: align/regionalize BED
+# Outputs: <id>_all_corrected.bed or {tag}_all_corrected.bed; per-region QC under qc/<tag>/
 [[run.stages]]
 name = "correct"
 
 [run.stages.flags]
 # Put any correct flags here. For FLAIR >= 3, genome is not required.
 
-# Note on ordering:
-# - If your workflow includes regionalize, list 'config/stages/regionalize.toml'
-#   before this file in your TSV so correct runs per-region.
-# - In general, TSV order defines execution for peers when no 'requires' are set.
+# Ordering: place after align (or after regionalize for targeted runs)

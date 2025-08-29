@@ -113,3 +113,25 @@ class CollapseStage(StageBase):
         ted = run_ted_qc(self.name, stage_dir, self.cfg, self.upstreams)
         sqanti = run_sqanti_qc(self.name, stage_dir, self.cfg, self.upstreams)
         return {**ted, **sqanti}
+
+    def expected_qc_files(self, stage_dir: Path) -> dict[str, Path] | None:
+        # Expect TED TSV always; add SQANTI results when sqanti env configured
+        paths: dict[str, Path] = {"TED": stage_dir / "qc" / "ted" / "TED.tsv"}
+        # If regionalized, also require browser mapping and referenced files
+        regional_beds = list(stage_dir.glob("*_*_*.isoforms.bed"))
+        if regional_beds:
+            region_map = stage_dir / "qc" / "ted" / "transcriptome_browser" / "region_map.json"
+            paths["TED_browser_map"] = region_map
+            try:
+                import json
+                if region_map.exists():
+                    data = json.loads(region_map.read_text())
+                    for tag, p in data.items():
+                        paths[f"browser:{tag}"] = Path(p)
+            except Exception:
+                pass
+        # SQANTI expected only when run-level sqanti_env is configured
+        env = getattr(getattr(self.cfg, "run", object()), "sqanti_env", None)
+        if env:
+            paths["SQANTI_results"] = stage_dir / "qc" / "sqanti" / "sqanti_results.tsv"
+        return paths
