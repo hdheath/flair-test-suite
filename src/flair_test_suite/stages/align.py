@@ -55,7 +55,9 @@ class AlignStage(StageBase):
         self._hash_inputs = resolved_reads + [genome]
 
         # --- parse flags and extra inputs ---
-        flag_parts, extra_inputs = self.resolve_stage_flags()
+        # Disallow user-provided core IO flags; harness sets these
+        reserved = ("r", "reads", "g", "genome", "q", "bed", "b", "bam", "o", "out")
+        flag_parts, extra_inputs = self.resolve_stage_flags(reserved=reserved)
         self._hash_inputs.extend(extra_inputs)
         self._flags_components = flag_parts
 

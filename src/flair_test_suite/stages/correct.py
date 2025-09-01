@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .base import StageBase
-from .stage_utils import collect_upstream_pairs, make_flair_cmd
+from .stage_utils import collect_upstream_pairs, make_flair_cmd, resolve_path
 from ..qc.correct_qc import run_qc
 from ..qc import write_metrics
 from ..qc.qc_utils import bed_is_empty
@@ -51,13 +51,71 @@ class CorrectStage(StageBase):
         genome = resolved["genome"]
         self._genome_fa_abs = str(genome)
 
-        flag_parts, extra_inputs = self.resolve_stage_flags()
+        reserved = ("r", "reads", "g", "genome", "q", "bed", "b", "bam", "o", "out")
+        flag_parts, extra_inputs = self.resolve_stage_flags(reserved=reserved)
+
+        # Auto-fill presence-only --gtf/-f and -j/--shortread from run-level inputs
+        added_inputs: List[Path] = []
+        data_dir = Path(cfg.run.data_dir)
+        new_parts: List[str] = []
+        i = 0
+        while i < len(flag_parts):
+            tok = flag_parts[i]
+            lowered = tok.lstrip("-").split("=", 1)[0].strip().lower()
+
+            def _has_inline_value(t: str) -> bool:
+                return "=" in t
+
+            def _next_is_value() -> bool:
+                return (i + 1 < len(flag_parts)) and (not flag_parts[i + 1].startswith("-"))
+
+            if lowered in ("f", "gtf"):
+                if _has_inline_value(tok) or _next_is_value():
+                    new_parts.append(tok)
+                    if not _has_inline_value(tok) and _next_is_value():
+                        new_parts.append(flag_parts[i + 1])
+                        i += 2
+                    else:
+                        i += 1
+                else:
+                    gtf = getattr(cfg.run, "gtf", None)
+                    if not gtf:
+                        raise RuntimeError("[correct] --gtf provided without value and run.gtf is not set")
+                    gtf_p = resolve_path(gtf, data_dir=data_dir)
+                    new_parts.extend([tok, str(gtf_p)])
+                    added_inputs.append(gtf_p)
+                    i += 1
+                continue
+
+            if lowered in ("j", "shortread"):
+                if _has_inline_value(tok) or _next_is_value():
+                    new_parts.append(tok)
+                    if not _has_inline_value(tok) and _next_is_value():
+                        new_parts.append(flag_parts[i + 1])
+                        i += 2
+                    else:
+                        i += 1
+                else:
+                    sj = getattr(cfg.run, "junctions", None)
+                    if not sj:
+                        raise RuntimeError("[correct] -j/--shortread provided without value and run.junctions is not set")
+                    sj_p = resolve_path(sj, data_dir=data_dir)
+                    new_parts.extend([tok, str(sj_p)])
+                    added_inputs.append(sj_p)
+                    i += 1
+                continue
+
+            new_parts.append(tok)
+            i += 1
+
+        flag_parts = new_parts
         self._flags_components = flag_parts
         self._hash_inputs = [
             genome,
             *[bf[0] for bf in self._bed_files],
             *upstream_sigs,
             *extra_inputs,
+            *added_inputs,
         ]
 
         align_meta = self.upstreams["align"].metadata
@@ -94,7 +152,7 @@ class CorrectStage(StageBase):
             "qc_sidecar":  Path("qc/correct_qc.tsv"),
         }
         # Optional per-region QC files (not used for reinstate, just helpful)
-        if getattr(self, "_bed_files", []) and "regionalize" in self.upstreams:
+        if getattr(self, "_bed_files", []) and ("region_test" in self.upstreams or "regionalize" in self.upstreams):
             for _, tag in self._bed_files:
                 outputs[f"{tag}_qc"] = Path("qc") / tag / "correct_qc.tsv"
         return outputs
@@ -107,7 +165,7 @@ class CorrectStage(StageBase):
           - non-regionalized: full before/after/diff
         Always writes an aggregate sidecar at stage root.
         """
-        is_regionalized = "regionalize" in self.upstreams
+        is_regionalized = ("region_test" in self.upstreams) or ("regionalize" in self.upstreams)
         qc_metrics = run_qc(
             bed_files=self._bed_files,
             stage_dir=stage_dir,

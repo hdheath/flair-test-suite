@@ -7,8 +7,21 @@ from .config_schema import Config, StageConfig
 
 
 def _has_manifest_flag(st: StageConfig) -> bool:
-    flags = getattr(st, "flags", {}) or {}
-    return "manifest" in flags and str(flags["manifest"]).strip() != ""
+    flags = getattr(st, "flags", None)
+    if isinstance(flags, dict):
+        v = flags.get("manifest")
+        return bool(v and str(v).strip())
+    if isinstance(flags, str):
+        toks = [t.strip() for t in flags.split(',') if t.strip()]
+    elif isinstance(flags, list):
+        toks = [str(t).strip() for t in flags if str(t).strip()]
+    else:
+        toks = []
+    for tok in toks:
+        t = tok.lstrip('-')
+        if t.startswith('manifest='):
+            return True
+    return False
 
 
 def validate_stage_order(cfg: Config) -> None:
@@ -43,9 +56,9 @@ def validate_stage_order(cfg: Config) -> None:
     seen: set[str] = set()
     for st in stages:
         n = st.name
-        if n == "regionalize":
+        if n == "region_test":
             if "align" not in seen:
-                raise ValueError("regionalize must appear after align in the TSV list")
+                raise ValueError("region_test must appear after align in the TSV list")
         elif n == "correct":
             # correct must follow align (optionally regionalize) and cannot
             # follow any downstream aggregation/terminal stages
@@ -64,9 +77,7 @@ def validate_stage_order(cfg: Config) -> None:
             # transcriptome requires align and optionally regionalize, but must
             # NOT follow correct. Enforce align seen and no prior correct.
             if "align" not in seen:
-                raise ValueError(
-                    "transcriptome must appear after align (optionally after regionalize) in the TSV list"
-                )
+                raise ValueError("transcriptome must appear after align (optionally after region_test) in the TSV list")
             if "correct" in seen:
                 raise ValueError(
                     "transcriptome cannot follow correct; remove 'correct' or place 'transcriptome' before it"

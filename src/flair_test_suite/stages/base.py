@@ -109,14 +109,17 @@ class StageBase(ABC):
                     self.logger.warning("Input file missing: %s -> %s", key, p)
         return resolved
 
-    def resolve_stage_flags(self, raw_flags=None) -> tuple[list[str], list[Path]]:
-        """Turn a flags dict into CLI parts and collect extra file inputs for signature."""
+    def resolve_stage_flags(self, raw_flags=None, *, reserved: tuple[str, ...] = ()) -> tuple[list[str], list[Path]]:
+        """Turn a flags block into CLI parts and collect extra file inputs for signature.
+
+        Accepts dict/list/str forms. Reserved flags are removed.
+        """
         cfg = self.cfg
         data_dir = Path(cfg.run.data_dir)
         if raw_flags is None:
             stage_cfg = get_stage_config(cfg, self.name)
             raw_flags = getattr(stage_cfg, "flags", {}) or {}
-        flag_parts, extra_inputs = parse_cli_flags(raw_flags, data_dir=data_dir)
+        flag_parts, extra_inputs = parse_cli_flags(raw_flags, data_dir=data_dir, reserved=reserved)
         return flag_parts, extra_inputs
 
     # ─────────────────────────────── Main runner ────────────────────────────────

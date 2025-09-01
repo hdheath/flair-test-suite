@@ -156,49 +156,144 @@ def parse_cli_flags(
     flags_block,
     *,
     data_dir: Path,
+    reserved: Tuple[str, ...] = (),
 ) -> Tuple[List[str], List[Path]]:
     """
     Convert a flags block into:
       • flag_parts   (for subprocess command)
       • extra_inputs (files that should be hashed)
+
+    Supports three forms:
+      - dict: {"threads": 8, "nvrna": True}
+      - list[str]: ["--threads=8", "--nvrna"]
+      - str: "--threads=8, --nvrna"
+
+    Reserved flags (e.g., output and core IO) are removed with a warning.
     """
 
     flag_parts: List[str] = []
     extra_inputs: List[Path] = []
 
-    def _push(k: str, v: str | int | None = None):
-        if len(k) == 1:
-            flag_parts.append(f"-{k}")
+    def _is_reserved_token(tok: str) -> bool:
+        t = tok.strip()
+        # Normalize long '--key' or '--key=value' to key for compare
+        if t.startswith("--"):
+            core = t[2:]
+        elif t.startswith("-"):
+            core = t[1:]
         else:
-            flag_parts.append(f"--{k}")
-        if v not in (None, "", True):
-            flag_parts.append(str(v))
+            core = t
+        core = core.split("=", 1)[0].split(None, 1)[0].strip().lower()
+        return core in reserved
 
-    for k, v in flags_block.items():
-        if v is False:  # user explicitly disabled
-            logger.warning("Flag '%s' is set to False and will be skipped.", k)
-            continue
-        if v in (None, "", True):
-            _push(k)
-        elif isinstance(v, (int, float)):
-            _push(k, v)
-        elif isinstance(v, str):
-            p = resolve_path(v, data_dir=data_dir)
+    def _collect_file_if_exists(val: str):
+        try:
+            p = resolve_path(val, data_dir=data_dir)
             if p.exists():
-                _push(k, p)
                 extra_inputs.append(p)
+        except Exception:
+            pass
+
+    # dict form (legacy-compatible)
+    if isinstance(flags_block, dict):
+        def _push(k: str, v: str | int | None = None):
+            if len(k) == 1:
+                flag_parts.append(f"-{k}")
             else:
-                logger.warning(
-                    "Flag '%s' value '%s' does not resolve to an existing file. Treating as option.",
-                    k,
-                    v,
-                )
+                flag_parts.append(f"--{k}")
+            if v not in (None, "", True):
+                flag_parts.append(str(v))
+
+        for k, v in flags_block.items():
+            k_norm = str(k).strip().lstrip("-").lower()
+            if k_norm in reserved:
+                logger.warning("Reserved flag '%s' will be ignored.", k)
+                continue
+            if v is False:
+                logger.warning("Flag '%s' is set to False and will be skipped.", k)
+                continue
+            if v in (None, "", True):
+                _push(k)
+            elif isinstance(v, (int, float)):
                 _push(k, v)
-        else:
-            logger.warning(
-                "Flag '%s' has an unrecognized type (%s). Treating as option.", k, type(v)
-            )
-            _push(k, v)
+            elif isinstance(v, str):
+                p = resolve_path(v, data_dir=data_dir)
+                if p.exists():
+                    _push(k, p)
+                    extra_inputs.append(p)
+                else:
+                    _push(k, v)
+            else:
+                _push(k, v)
+        return flag_parts, extra_inputs
+
+    # list/str form → raw CLI tokens, then whitespace-split tokens
+    import shlex
+    raw_tokens: List[str]
+    if isinstance(flags_block, str):
+        raw_tokens = [t.strip() for t in flags_block.split(",") if t.strip()]
+    elif isinstance(flags_block, list):
+        raw_tokens = [str(t).strip() for t in flags_block if str(t).strip()]
+    elif flags_block is None:
+        raw_tokens = []
+    else:
+        raw_tokens = [str(flags_block).strip()]
+
+    # Flatten space-separated parts within each token using shell-like splitting
+    parts: List[str] = []
+    for tok in raw_tokens:
+        try:
+            parts.extend(shlex.split(tok))
+        except Exception:
+            parts.append(tok)
+
+    # Walk tokens with awareness of flag-value pairs
+    i = 0
+    while i < len(parts):
+        tok = parts[i]
+        # Reserved handling: drop flag and its value if present
+        if _is_reserved_token(tok):
+            logger.warning("Reserved flag '%s' will be ignored.", tok)
+            # skip paired value when of the form '--opt value'
+            if ("=" not in tok) and (i + 1 < len(parts)) and (not parts[i + 1].startswith("-")):
+                i += 2
+            else:
+                i += 1
+            continue
+
+        flag_parts.append(tok)
+        # key=value form: try to resolve value to a file under data_dir
+        if "=" in tok:
+            head, v = tok.split("=", 1)
+            try:
+                p = resolve_path(v, data_dir=data_dir)
+                if p.exists():
+                    # replace inline value with resolved absolute path
+                    flag_parts[-1] = f"{head}={p}"
+                    extra_inputs.append(p)
+                else:
+                    _collect_file_if_exists(v)
+            except Exception:
+                _collect_file_if_exists(v)
+            i += 1
+            continue
+
+        # Hash file when using '--opt value' form
+        if tok.startswith("-") and (i + 1 < len(parts)) and (not parts[i + 1].startswith("-")):
+            val = parts[i + 1]
+            try:
+                p = resolve_path(val, data_dir=data_dir)
+                if p.exists():
+                    flag_parts.append(str(p))
+                    extra_inputs.append(p)
+                else:
+                    flag_parts.append(val)
+            except Exception:
+                flag_parts.append(val)
+            i += 2
+            continue
+
+        i += 1
 
     return flag_parts, extra_inputs
 
@@ -224,16 +319,17 @@ def collect_upstream_pairs(
     pairs: list[tuple[Path, str]] = []
     upstream_sigs: list[Path] = []
 
-    if "regionalize" in upstreams:
+    if "region_test" in upstreams or "regionalize" in upstreams:
         mode = "regionalized"
-        reg_pb = upstreams["regionalize"]
+        reg_pb = upstreams.get("region_test") or upstreams.get("regionalize")
         upstream_sigs.append(reg_pb.signature)
         # region_details.tsv is stored under qc/ (preferred). Fallback to legacy locations.
         details = reg_pb.stage_dir / "qc" / "region_details.tsv"
         if not details.exists():
-            # Legacy: qc/regionalize/region_details.tsv
-            legacy = reg_pb.stage_dir / "qc" / "regionalize" / "region_details.tsv"
-            details = legacy if legacy.exists() else (reg_pb.stage_dir / "region_details.tsv")
+            # Legacy: qc/regionalize/region_details.tsv and qc/region_test/region_details.tsv
+            legacy1 = reg_pb.stage_dir / "qc" / "regionalize" / "region_details.tsv"
+            legacy2 = reg_pb.stage_dir / "qc" / "region_test" / "region_details.tsv"
+            details = legacy1 if legacy1.exists() else (legacy2 if legacy2.exists() else (reg_pb.stage_dir / "region_details.tsv"))
         if not details.exists():
             raise RuntimeError(f"[{stage_name}] region_details.tsv not found: {details}")
 

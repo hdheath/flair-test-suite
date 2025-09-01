@@ -90,7 +90,8 @@ class TranscriptomeStage(StageBase):
         self._genome_fa_abs = str(genome)
 
         # Parse flags
-        flag_parts, extra_inputs = self.resolve_stage_flags()
+        reserved = ("r", "reads", "g", "genome", "q", "bed", "b", "bam", "o", "out")
+        flag_parts, extra_inputs = self.resolve_stage_flags(reserved=reserved)
 
         # Signature inputs: genome + all BAMs + upstream sigs + extra inputs
         self._hash_inputs = [
@@ -154,4 +155,3 @@ class TranscriptomeStage(StageBase):
         if env:
             paths["SQANTI_results"] = stage_dir / "qc" / "sqanti" / "sqanti_results.tsv"
         return paths
-

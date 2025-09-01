@@ -66,11 +66,27 @@ class QuantifyStage(StageBase):
     def build_cmds(self) -> List[List[str]]:
         cfg = self.cfg
         stage_cfg = get_stage_config(cfg, self.name)
-        raw_flags = dict(getattr(stage_cfg, "flags", {}) or {})
-
-        manifest_src = raw_flags.pop("manifest", None)
+        flags_block = getattr(stage_cfg, "flags", None)
+        manifest_src = None
+        if isinstance(flags_block, list):
+            toks = [str(t).strip() for t in flags_block if str(t).strip()]
+        elif isinstance(flags_block, str):
+            toks = [t.strip() for t in flags_block.split(',') if t.strip()]
+        elif isinstance(flags_block, dict):
+            manifest_src = flags_block.pop("manifest", None)
+            toks = []
+        else:
+            toks = []
+        keep_toks: list[str] = []
+        for tok in toks:
+            t = tok.lstrip('-')
+            if t.startswith('manifest=') and manifest_src is None:
+                manifest_src = t.split('=', 1)[1]
+            else:
+                keep_toks.append(tok)
+        raw_flags = keep_toks if keep_toks else (flags_block if isinstance(flags_block, dict) else {})
         if manifest_src is None:
-            raise RuntimeError("manifest file is required; provide via flags.manifest")
+            raise RuntimeError("manifest file is required; provide as --manifest=reads_manifest.tsv")
         data_dir = Path(cfg.run.data_dir)
 
         isoforms_fa = self._find_isoforms_fasta()
@@ -99,7 +115,9 @@ class QuantifyStage(StageBase):
             seen[sample] = key
             reads_paths.append(reads_p)
 
-        flag_parts, extra_inputs = self.resolve_stage_flags(raw_flags)
+        # Disallow core IO flags: -r/-i/-o
+        reserved = ("r", "reads", "i", "o", "out")
+        flag_parts, extra_inputs = self.resolve_stage_flags(raw_flags, reserved=reserved)
 
         upstream_sigs = []
         for name in ("combine", "transcriptome", "collapse"):

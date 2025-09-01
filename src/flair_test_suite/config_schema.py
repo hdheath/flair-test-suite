@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
@@ -27,11 +27,14 @@ def _split_commas_preserve_escapes(s: str) -> List[str]:
 class StageConfig(BaseModel):
     name: str
     requires: List[str] = Field(default_factory=list)
-    flags: Dict[str, Any] = Field(default_factory=dict)
+    # Accept either a TOML-style dict OR a raw list/string of CLI tokens
+    flags: Any = Field(default_factory=dict)
 
 class RunConfig(BaseModel):
     version: str
-    conda_env: str
+    # Accept either 'flair_env' or 'conda_env' in configs; normalize to conda_env
+    conda_env: str | None = None
+    flair_env: str | None = None
     data_dir: str
 
     # Accept str or list[str]; normalize to list[str]
@@ -86,6 +89,15 @@ class RunConfig(BaseModel):
     reference_5_prime_regions_bed_file: Optional[str] = None
     reference_3_prime_regions_bed_file: Optional[str] = None
     stages: List[StageConfig]
+
+    @model_validator(mode="after")
+    def _normalize_env(self):
+        # Prefer explicitly provided conda_env; otherwise use flair_env
+        if not self.conda_env and self.flair_env:
+            self.conda_env = self.flair_env
+        if not self.conda_env:
+            raise ValueError("Missing environment: set 'flair_env' (preferred) or 'conda_env' in inputs")
+        return self
 
 class Config(BaseModel):
     # Preferred identifier for a test case

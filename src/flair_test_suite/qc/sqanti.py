@@ -250,10 +250,8 @@ def collect(stage_dir: Path, cfg, upstreams=None, *, out_dir: Optional[Path] = N
     if not _conda_env_exists(env):
         logger.warning(f"[SQANTI] conda env '{env}' not found; skipping")
         return
-    cpus = (
-        int(getattr(getattr(cfg, "run", object()), "sqanti_cpus", 0))
-        or (int(qc_block.get("cpus", 4)) if isinstance(qc_block, dict) else 4)
-    )
+    # Hard-code CPUs to 4 regardless of config
+    cpus = 4
 
     data_dir = Path(cfg.run.data_dir)
     ref_gtf = stage_utils.resolve_path(cfg.run.gtf, data_dir=data_dir)

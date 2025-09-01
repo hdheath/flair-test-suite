@@ -35,47 +35,35 @@ which flair-test-suite  # should print path inside env
 
 ## Before Running the Test Suite
 
-* Users must already have downloaded FLAIR in a conda env they would like to use.
-* All input data used for a run must be located in the same directory.
+- Have FLAIR installed in a conda env you will use (e.g., `flair`).
+- Place all input data for a run under a single `data_dir` (you can symlink large files to avoid duplication).
 
-  * Tip: you can symlink large files to the input directory to avoid duplication.
-
-    ```bash
-    # pseudo command to create a symbolic link instead of copying large files
-    ln -s /path/to/shared/genome.fa /path/to/data_dir/genome.fa
-    ```
+  ```bash
+  ln -s /path/to/shared/genome.fa /path/to/data_dir/genome.fa
+  ```
 
 ---
 
 ## Running the Test Suite
 
-Runs are defined by a TSV configuration file that points to TOML templates. Paths are resolved relative to the TSV file.
+Define runs with a single TSV named `flair_test_suite_config.tsv` (two sections) per test set. The first section lists inputs as `key<TAB>value`; the second lists stages `stage<TAB>flags`. A new case starts at each `align` row. Paths resolve relative to the TSV file.
 
-1) Copy and edit `config/templates/inputs.toml` (base inputs).
-   - Set `test_set_id`.
-   - Fill `run.version`, `run.conda_env`, `run.data_dir`, `run.reads_file`, and any shared inputs (`gtf`, `regions_tsv`, `junctions`, TSS/TES BEDs).
-2) Choose stage templates from `config/templates/` and edit flags as needed:
-   - `align.toml`, `correct.toml`, optional `regionalize.toml`, then `collapse.toml` or `transcriptome.toml`.
-   - Optional downstream: `combine.toml`, `quantify.toml` (see configuration templates in the same folder).
+1) Copy and edit the template into your config file:
+   - `cp config/templates/combined_cases.tsv flair_test_suite_config.tsv`
+   - In the `key\tvalue` section, set `test_set_id`, `version`, `flair_env` (Conda env containing FLAIR), `data_dir`, `reads_file`, and shared inputs (`genome_fa`, `gtf`, optional `junctions`, `sqanti_env`).
+   - In the `stage\tflags` section, list stages in order. Flags are written exactly as in the FLAIR CLI, but comma-separated within the row. Both `--opt value` and `--opt=value` forms are accepted (e.g., `--nvrna, --threads 8`). Use `region_test` and pass `--regions-tsv regions.tsv` for region runs.
 
-For help creating these, visit:
-[Guide to Creating Configurations for Test Cases](docs/configurations.md)
-
-3) Create a TSV configuration (one test case per line):
-
-```text
-config/templates/inputs.toml	config/templates/align.toml	config/templates/correct.toml	config/templates/collapse.toml
-```
-
-4) Run the suite:
+2) Run the suite:
 
 ```bash
-flair-test-suite path/to/cases.tsv
+flair-test-suite flair_test_suite_config.tsv
 ```
 
 Notes:
-- Outputs always write to `./outputs/<test_set_id>/`. A `run_summary.log` is created per test set.
-- For targeted region runs, add `regionalize.toml` and provide a 3-column region TSV (see `config/templates/region_template.tsv`).
+- Outputs write to `./outputs/<test_set_id>/` with a `run_summary.log` per test set.
+- Region-scoped runs: add a `region_test` row after `align` and pass `--regions-tsv=<path>`; region TSV is 3 columns: `chr  start  end`.
+
+For more configuration details and examples, see: `docs/configurations.md`.
 
 ---
 

@@ -637,18 +637,21 @@ def _build_region_metrics_index(run_root: Path, regionalize_dir: Path | None = N
     Build index: region_tag -> {'gene_count', 'transcript_count', 'reg_dir'}.
 
     If ``regionalize_dir`` is provided, only that directory is scanned.
-    Otherwise, scan all ``regionalize/*`` directories.
+    Otherwise, scan all ``region_test/*`` (preferred) or ``regionalize/*`` directories.
     """
     idx: Dict[str, Dict] = {}
     if regionalize_dir is not None:
         dirs = [regionalize_dir]
     else:
-        regionalize_root = run_root / "regionalize"
-        if not regionalize_root.exists():
+        # Prefer region_test; fallback to regionalize for backward compatibility
+        root = run_root / "region_test"
+        if not root.exists():
+            root = run_root / "regionalize"
+        if not root.exists():
             return idx
-        dirs = [d for d in regionalize_root.iterdir() if d.is_dir()]
+        dirs = [d for d in root.iterdir() if d.is_dir()]
     for d in dirs:
-        # regionalize QC writes metrics under qc/region_metrics.tsv (preferred)
+        # region_test QC writes metrics under qc/region_metrics.tsv (preferred)
         # Backward compatibility: also look under qc/regionalize/region_metrics.tsv and stage root
         candidates = [
             d / "qc" / "region_metrics.tsv",
@@ -892,16 +895,19 @@ def collect(
     logging.debug(f"[TED] Regional isoform beds: {[p.name for p in regional_files]}")
     logging.debug(f"[TED] is_regionalized: {is_regionalized}")
 
-    # If no peak config for this stage and we're regionalized, fallback to regionalize stage config
+    # If no peak config for this stage and we're regionalized, fallback to region_test (or regionalize) stage config
     if is_regionalized and not any(peaks_cfg.values()):
         logger.info(
-            f"[TED] No peak config for stage '{stage_name}', falling back to 'regionalize' config for regionalized run."
+            f"[TED] No peak config for stage '{stage_name}', falling back to 'region_test' config for regionalized run."
         )
-        peaks_cfg, window = _build_peaks_cfg(cfg, "regionalize")
+        try:
+            peaks_cfg, window = _build_peaks_cfg(cfg, "region_test")
+        except Exception:
+            peaks_cfg, window = _build_peaks_cfg(cfg, "regionalize")
     logging.debug(f"[TED] Window: {window}")
     logging.debug(f"[TED] Peaks configuration (final): {peaks_cfg}")
 
-    regionalize_pb = (upstreams or {}).get("regionalize")
+    regionalize_pb = (upstreams or {}).get("region_test") or (upstreams or {}).get("regionalize")
     reg_index = _build_region_metrics_index(
         run_root, regionalize_pb.stage_dir if regionalize_pb else None
     )
@@ -912,18 +918,20 @@ def collect(
 
     if is_regionalized:
         # ── Regionalized: iterate over discovered isoform files
-        # Prefer the explicit regionalize PathBuilder when provided
+        # Prefer the explicit region_test PathBuilder when provided
         if regionalize_pb is not None:
             reg_dir_base = regionalize_pb.stage_dir
         else:
-            # Fallback: try to infer from outputs/<run_id>/regionalize/<hash>
+            # Fallback: try to infer from outputs/<run_id>/region_test/<hash> (preferred) or regionalize/<hash>
             # ``stage_dir`` is <run>/<stage>/<hash>; the hash component is the
             # name of ``stage_dir`` itself, not its parent.  Previously the
             # parent directory name (e.g. ``collapse``) was used which produced
             # paths like ``regionalize/collapse`` and caused sliced peak files
             # to be missed.  Use the stage hash instead.
             hash_dir = stage_dir.name
-            reg_dir_base = stage_dir.parent.parent / "regionalize" / hash_dir
+            reg_dir_base = stage_dir.parent.parent / "region_test" / hash_dir
+            if not reg_dir_base.exists():
+                reg_dir_base = stage_dir.parent.parent / "regionalize" / hash_dir
         for iso_bed in regional_files:
             tag = iso_bed.stem.replace(".isoforms", "")
             logging.debug(f"[TED] Processing region tag: {tag}")

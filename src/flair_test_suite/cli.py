@@ -10,6 +10,7 @@ from typing import Dict, Iterable, Iterator, Optional, Tuple, Union
 import click
 
 from .config_loader import load_config, load_config_fragments
+from .tsv_loader import build_configs_from_two_section
 from .config_schema import Config
 from .stages import STAGE_REGISTRY
 from .validation import validate_stage_order
@@ -36,58 +37,14 @@ def _iter_config_paths(tsv_path: Path) -> Iterator[Path]:
 
 
 def parse_cases_tsv(tsv_path: Path) -> Iterator[Config]:
-    """Yield Config objects assembled from a TSV manifest (base-first only).
-
-    Required row format (tab-separated, paths resolved relative to the TSV):
-        base_config.toml\tstage1.toml\tstage2.toml\t...
-
-    The base config must define test_set_id.
-    """
-    with tsv_path.open() as fh:
-        reader = csv.reader(fh, delimiter="\t")
-        for row in reader:
-            if not row:
-                continue
-            if row[0].startswith("#"):
-                continue
-            if len(row) < 2:
-                raise ValueError("Each TSV row must have at least a base config and one stage config")
-            first = row[0].strip()
-            rest = [c.strip() for c in row[1:] if c.strip()]
-
-            def _resolve(p: str) -> Path:
-                path = Path(p)
-                if not path.is_absolute():
-                    path = (tsv_path.parent / path).resolve()
-                return path
-
-            base_path = _resolve(first)
-            if not base_path.exists() or base_path.suffix.lower() != ".toml":
-                raise ValueError(
-                    f"First column must be a TOML base config; got '{first}'"
-                )
-            stage_paths = [_resolve(p) for p in rest]
-            if not stage_paths:
-                raise ValueError(
-                    "Each row must include at least one stage fragment after the base config"
-                )
-            cfg = load_config_fragments(base_path, stage_paths)
-            # Remember source TSV for logging/diagnostics
-            try:
-                setattr(cfg, "_path", str(tsv_path))
-            except Exception:
-                pass
-            rid = (
-                getattr(cfg, "test_set_id", None)
-                or getattr(cfg.run, "test_set_id", None)
-                or getattr(cfg, "run_id", None)
-                or getattr(cfg.run, "run_id", None)
-            )
-            if not rid:
-                raise ValueError(
-                    f"Base config '{base_path}' is missing test_set_id; add test_set_id under the top-level or [run] section."
-                )
-            yield cfg
+    """Yield Config objects from the two-section cases TSV."""
+    cfgs = build_configs_from_two_section(tsv_path)
+    for cfg in cfgs:
+        try:
+            setattr(cfg, "_path", str(tsv_path))
+        except Exception:
+            pass
+        yield cfg
 
 
 
@@ -121,10 +78,7 @@ def _execute_stage(
     """Execute one stage. Returns (failed, skipped)."""
     StageCls = STAGE_REGISTRY[st_cfg.name]
     stage_instance = StageCls(cfg, run_id, work_dir, upstreams)
-    try:
-        stage_instance._build_and_normalize_cmds()
-    except Exception:
-        pass
+    # Avoid pre-building commands here to prevent duplicate build logs.
 
     logger.info("Starting %s", st_cfg.name)
     click.echo(f"Running {st_cfg.name}")
@@ -250,18 +204,18 @@ def run_configs(
 @click.argument("config_input", type=click.Path(exists=True, path_type=Path))
 def main(config_input: Path) -> None:
     """Entry point for the CLI."""
-    if config_input.suffix.lower() in (".tsv", ".txt"):
-        inputs = list(parse_cases_tsv(config_input))
-        # Annotate each Config with its index to log in the run summary
-        total = len(inputs)
-        for i, cfg in enumerate(inputs, 1):
-            try:
-                setattr(cfg, "_case_idx", i)
-                setattr(cfg, "_case_total", total)
-            except Exception:
-                pass
-    else:
-        raise click.UsageError("Only TSV manifests are supported. Provide a TSV with: base_config\tstage1\tstage2...")
+    if config_input.suffix.lower() not in (".tsv", ".txt"):
+        raise click.UsageError("Only the combined TSV format is supported.")
+    inputs = list(parse_cases_tsv(config_input))
+    if not inputs:
+        raise click.UsageError("Combined TSV parsed no cases. Ensure it has a header and at least one align row.")
+    total = len(inputs)
+    for i, cfg in enumerate(inputs, 1):
+        try:
+            setattr(cfg, "_case_idx", i)
+            setattr(cfg, "_case_total", total)
+        except Exception:
+            pass
     sys.exit(run_configs(inputs))
 
 

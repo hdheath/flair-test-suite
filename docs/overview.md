@@ -10,6 +10,8 @@ This FLAIR test suite provides the means for running and benchmarking different 
 4. [Dataset Attributes](#dataset-attributes)
 5. [Pipeline Stages & QC](#pipeline-stages--qc)
 6. [Output Layout](#output-layout)
+7. [Re-run & Caching](#re-run--caching)
+8. [Regionalized Effects](#regionalized-effects)
 
 ---
 
@@ -17,11 +19,11 @@ This FLAIR test suite provides the means for running and benchmarking different 
 
 | Term         | Definition                                                                                                                                                                                                                      |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_case`  | A documented config file that contains reasoning and the blueprint for a complete FLAIR workflow from raw reads through FLAIR quantify with self-contained stage options at each step.                                         |
-| `run`        | An end-to-end execution of a `test_case` (identified by `test_set_id`).                                                                                                                                                          |
-| `stage`      | One FLAIR sub-command (`align`, `correct`, `regionalize`, `collapse`, `transcriptome`).                                                                                                                                                |
-| `flags`      | CLI options under `[run.stages.flags]`.                                                                                                                                                                                          |
-| `signature`  | The name of the directory under `<stage>` (e.g. `align/abcd1234`), based on the signature string <code>`tool_version \| flags \| input_hashes`</code>. Helps determine if a stage has already been completed and can be skipped. |
+| `test_set`   | A single configuration file (`flair_test_suite_config.tsv`) that defines shared inputs (key/value section) and one or more test cases (stage/flags section). All outputs write under `outputs/<test_set_id>/`.                   |
+| `test_case`  | One contiguous workflow within a test set, starting at an `align` row and listing subsequent stages left→right (e.g., align → correct → collapse). Multiple cases may be defined in the same test-set.                               |
+| `stage`      | One FLAIR sub-command in a test-case(`align`, `correct`, `region_test`, `collapse`, `transcriptome`, `combine`, `quantify`).                                                                                                                    |
+| `flags`      | CLI options provided exactly as you would on the FLAIR command line, but comma-separated within the TSV cell. Both `--opt value` and `--opt=value` are accepted. Reserved IO flags are managed by the suite.                     |
+| `signature`  | The name of the directory under `<stage>` (e.g. `align/abcd1234`), based on the string <code>`tool_version \| flags \| input_hashes`</code>. Used to detect when a stage can be skipped (cache hit).                           |
 
 
 
@@ -38,7 +40,7 @@ The FLAIR Test Suite is organized around **end-to-end test cases** After each st
 
 ## Dataset Types
 
-Test cases are defined by the nature of the dataset. Long-read data acceptable for the test-suite include : 
+Test sets are defined by the nature of the dataset. Long-read data acceptable for the test-suite include : 
 
 - **Simulated Data Tests**  
   Use artificial datasets where the “true” isoforms are known in advance (e.g., simulated reads from a known transcript set, or spike-in controls). These help validate correctness without biological ambiguity.
@@ -54,11 +56,11 @@ This grouping ensures that any changes affecting a specific data type (e.g., pol
 
 ### Region/Scope
 
-Test cases are also defined by region. A region is a genomic coordinate where we expect FLAIR to analyze transcripts. Test cases choose one of these region scopes:
+Test cases can be defined by region. A region is a genomic coordinate where we expect FLAIR to analyze transcripts. Test cases choose one of these region scopes:
 
 - **Targeted Region Tests**  
   Run on a limited locus or small gene set (e.g., reads mapping to chr21 or a single gene). Cover challenging regions (e.g., high gene density, pseudogenes, repetitive sequences). Helps ensure corner cases are regularly checked and helps select quick tests for fast feedback.  
-**⚠️ Note:** **To implement a targeted region test** use a template that includes the `regionalize` stage. 
+**⚠️ Note:** **To implement a targeted region test** use a template that includes the `region_test` stage. 
 
 - **Whole-Transcriptome Tests**  
   Run on genome-wide data (e.g., whole human transcriptome) to ensure the pipeline scales to full dataset sizes and complexities.
@@ -70,7 +72,7 @@ Test cases are further defined by the **FLAIR version** that is ran.
 | FLAIR tag | Supported stages                               |
 | --------- | ---------------------------------------------- |
 | **2.x**   | align, correct, collapse                       |
-| **3.x**   | align, correct, regionalize, collapse, transcriptome |
+| **3.x**   | align, correct, region_test, collapse, transcriptome |
 
 
 ---
@@ -104,7 +106,7 @@ The test suite expects the user to have, at bare minimum :
 | --------------- | --------------------- | ----------------------------------------------------------- |
 | `align`         | BAM + BED             | MAPQ, read identity/length, unique junctions, splice motifs |
 | `correct`       | corrected BED         | reads removed %, unique junctions, splice-motifs            |
-| `regionalize`         | region BAM/BED/FA/GTF | feature counts from GTF (e.g., number of genes)             |
+| `region_test`         | region BAM/BED/FA/GTF | feature counts from GTF (e.g., number of genes)             |
 | `collapse`      | isoforms BED/GTF      | TED metrics, SQANTI classification                         |
 | `transcriptome` | isoforms BED/GTF      | TED metrics, SQANTI classification                         |
 
@@ -124,8 +126,35 @@ outputs/
     ├── run_summary.log
     ├── align/<sig>/
     ├── correct/<sig>/
-    ├── regionalize/<sig>/
+    ├── region_test/<sig>/
     ├── collapse/<sig>/
     └── transcriptome/<sig>/
 ```
 
+---
+
+## Re-run & Caching
+
+- Each stage writes to `outputs/<test_set_id>/<stage>/<signature>/`.
+- A stage’s signature encodes tool version, flags, and hashes of input files.
+- Re-run behavior:
+  - If marker, primary output, and QC exist → stage is skipped.
+  - If primary exists but QC is missing → QC is regenerated.
+  - Otherwise → the stage runs normally.
+- Cache reuse across cases:
+  - When the same stage appears again in the same test set with identical inputs and flags (same signature), it is skipped and the outputs are reused.
+
+---
+
+## Regionalized Effects
+
+Including a `region_test` stage after `align` switches downstream stages into regionalized mode and operates per region. Impacts:
+
+- Input discovery: `correct` and `collapse`/`transcriptome` find per‑region upstream files using the region index at `qc/region_details.tsv`. Missing/empty regions are skipped with a warning.
+- Filenames and tags: each region is `{chrom}_{start}_{end}`. Downstream outputs include the tag, e.g., `{tag}.isoforms.bed`.
+- QC outputs:
+  - `correct` writes per‑region QC under `qc/<tag>/correct_qc.tsv` (plus an aggregate `qc/correct_qc.tsv`).
+  - TED runs automatically and writes one row per region to `qc/ted/TED.tsv`; a transcriptome browser mapping is saved at `qc/ted/transcriptome_browser/region_map.json`.
+- Combine behavior: `combine` auto‑discovers all `{tag}.isoforms.bed` files from upstream `collapse`/`transcriptome` and appends them to the manifest (deduplicated by path).
+- Quantify behavior: `quantify` selects the correct isoform FASTA from upstream (`combine` preferred, else `transcriptome`/`collapse`).
+- Caching: regionalized runs produce a distinct signature set so they do not collide with non‑regionalized runs.

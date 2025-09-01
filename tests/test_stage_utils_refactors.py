@@ -28,7 +28,7 @@ def test_collect_upstream_pairs_standard(tmp_path):
 
 def test_collect_upstream_pairs_regionalized(tmp_path):
     run_id = "run1"
-    reg_pb = PathBuilder(tmp_path, run_id, "regionalize", "sigR")
+    reg_pb = PathBuilder(tmp_path, run_id, "region_test", "sigR")
     corr_pb = PathBuilder(tmp_path, run_id, "correct", "sigC")
     reg_pb.stage_dir.mkdir(parents=True, exist_ok=True)
     corr_pb.stage_dir.mkdir(parents=True, exist_ok=True)
@@ -39,7 +39,7 @@ def test_collect_upstream_pairs_regionalized(tmp_path):
 
     pairs, sigs, mode = collect_upstream_pairs(
         "collapse",
-        {"regionalize": reg_pb, "correct": corr_pb},
+        {"region_test": reg_pb, "correct": corr_pb},
         run_id,
         "all_corrected.bed",
         "{chrom}_{start}_{end}_all_corrected.bed",

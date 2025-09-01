@@ -36,7 +36,7 @@ def test_collect_regionalized_run_level(tmp_path: Path, monkeypatch):
     corr_dir.mkdir(parents=True)
     (corr_dir / f'{tag}_all_corrected.bed').write_text('chr1\t10\t50\tread_ENSG000001.1\t0\t+\n')
 
-    reg_dir = repo_root / 'outputs' / run_id / 'regionalize' / 'reg1'
+    reg_dir = repo_root / 'outputs' / run_id / 'region_test' / 'reg1'
     reg_dir.mkdir(parents=True)
     (reg_dir / 'region_metrics.tsv').write_text('region_tag\tgene_count\ttranscript_count\nchr1_0_100\t1\t1\n')
     for base in ['exp5.bed', 'exp3.bed', 'ref5.bed', 'ref3.bed']:
@@ -66,9 +66,9 @@ def test_collect_regionalized_run_level(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(ted, '_tss_tts_metrics_full', fake_metrics)
 
-    reg_pb = PathBuilder(repo_root / 'outputs', run_id, 'regionalize', 'reg1')
+    reg_pb = PathBuilder(repo_root / 'outputs', run_id, 'region_test', 'reg1')
     out_dir = stage_dir / 'qc' / 'ted'
-    ted.collect(stage_dir, cfg, upstreams={'regionalize': reg_pb}, out_dir=out_dir)
+    ted.collect(stage_dir, cfg, upstreams={'region_test': reg_pb}, out_dir=out_dir)
 
     assert captured['prime5'] == reg_dir / f'{tag}_exp5.bed'
     assert captured['prime3'] == reg_dir / f'{tag}_exp3.bed'

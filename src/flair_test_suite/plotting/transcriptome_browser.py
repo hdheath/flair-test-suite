@@ -209,7 +209,7 @@ def generate(cfg: Config, region: Optional[str] = None) -> Optional[Path]:
     if region_tuple:
         tag = f"{chrom}_{r0}_{r1}"
         run_root = gtf.parent.parent.parent
-        reg_root = run_root / "regionalize"
+        reg_root = run_root / "region_test"
         if reg_root.exists():
             for d in reg_root.iterdir():
                 cand = d / f"{tag}.bam"
@@ -555,4 +555,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

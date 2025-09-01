@@ -1,6 +1,6 @@
 from .align import AlignStage
 from .correct import CorrectStage
-from .regionalize import RegionalizeStage
+from .region_test import RegionTestStage
 from .collapse import CollapseStage
 from .combine import CombineStage
 from .transcriptome import TranscriptomeStage
@@ -10,7 +10,7 @@ from .quantify import QuantifyStage
 STAGE_REGISTRY = {
     AlignStage.name: AlignStage,
     CorrectStage.name: CorrectStage,
-    RegionalizeStage.name: RegionalizeStage,
+    RegionTestStage.name: RegionTestStage,
     CollapseStage.name: CollapseStage,
     CombineStage.name: CombineStage,
     TranscriptomeStage.name: TranscriptomeStage,

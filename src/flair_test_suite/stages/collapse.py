@@ -70,7 +70,8 @@ class CollapseStage(StageBase):
             reads = [reads]
         reads = [Path(r) for r in reads]
 
-        flag_parts, extra_inputs = self.resolve_stage_flags()
+        reserved = ("r", "reads", "g", "genome", "q", "bed", "b", "bam", "o", "out")
+        flag_parts, extra_inputs = self.resolve_stage_flags(reserved=reserved)
         if "--generate_map" not in flag_parts:
             flag_parts.append("--generate_map")
 
