@@ -228,10 +228,12 @@ def collect_upstream_pairs(
         mode = "regionalized"
         reg_pb = upstreams["regionalize"]
         upstream_sigs.append(reg_pb.signature)
-        # region_details.tsv is stored under qc/regionalize in newer runs; fall back to root for legacy
-        details = reg_pb.stage_dir / "qc" / "regionalize" / "region_details.tsv"
+        # region_details.tsv is stored under qc/ (preferred). Fallback to legacy locations.
+        details = reg_pb.stage_dir / "qc" / "region_details.tsv"
         if not details.exists():
-            details = reg_pb.stage_dir / "region_details.tsv"
+            # Legacy: qc/regionalize/region_details.tsv
+            legacy = reg_pb.stage_dir / "qc" / "regionalize" / "region_details.tsv"
+            details = legacy if legacy.exists() else (reg_pb.stage_dir / "region_details.tsv")
         if not details.exists():
             raise RuntimeError(f"[{stage_name}] region_details.tsv not found: {details}")
 

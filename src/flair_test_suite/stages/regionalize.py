@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from .base import StageBase
+from .base import StageBase, StageAction
 from .stage_utils import resolve_path
 from ..lib.paths import PathBuilder
 from ..lib.input_hash import hash_many
@@ -126,11 +126,11 @@ class RegionalizeStage(StageBase):
 
         cmds: List[List[str]] = []
 
-        # region_details.tsv (primary) under qc/regionalize
+        # region_details.tsv (primary) under qc/ (avoid repeating 'regionalize')
         header = "chrom\tstart\tend\tspan_bp"
         body = "\n".join(f"{c}\t{s}\t{e}\t{e - s + 1}" for c, s, e in self._regions)
-        cmds.append(["bash", "-lc", "mkdir -p qc/regionalize"])
-        heredoc = f"cat > qc/regionalize/region_details.tsv << 'EOF'\n{header}\n{body}\nEOF"
+        cmds.append(["bash", "-lc", "mkdir -p qc"])
+        heredoc = f"cat > qc/region_details.tsv << 'EOF'\n{header}\n{body}\nEOF"
         cmds.append(["bash", "-lc", heredoc])
 
         # Per-region artifacts
@@ -138,13 +138,22 @@ class RegionalizeStage(StageBase):
             tag = f"{chrom}_{start}_{end}"
             tmp = f"tmp_sort_{tag}"
 
-            # BAM
-            pipe = (
-                f"samtools view -b '{self._align_bam}' '{chrom}:{start}-{end}'"
-                f" | samtools sort -o '{tag}.bam' -T '{tmp}'"
-            )
-            cmds.append(["bash", "-lc", pipe])
-            cmds.append(["bash", "-lc", f"samtools index '{tag}.bam'"])
+            # BAM (fully contained reads only):
+            # Use samtools view -h to get SAM, filter with awk to keep only
+            # alignments whose reference span is fully within [start,end], then
+            # convert back to BAM and sort.
+            bam_pipe = (
+                "samtools view -h '%(bam)s' '%(chrom)s:%(start)d-%(end)d' | "
+                "awk -v s=%(start)d -v e=%(end)d '"
+                "BEGIN{OFS=\"\t\"} "
+                "/^@/ {print; next} "
+                "{pos=$4; cig=$6; if (pos==\"\" || cig==\"*\") next; "
+                "len=0; c=cig; while (match(c, /[0-9]+[MIDNSHP=X]/)) {n=substr(c, RSTART, RLENGTH-1); op=substr(c, RSTART+RLENGTH-1, 1); if (op ~ /[MDN=X]/) len += n; c=substr(c, RSTART+RLENGTH);} "
+                "end=pos+len-1; if (pos>=s && end<=e) print}' | "
+                "samtools view -Sb - | samtools sort -o '%(tag)s.bam' -T '%(tmp)s'"
+            ) % {"bam": str(self._align_bam), "chrom": chrom, "start": start, "end": end, "tag": tag, "tmp": tmp}
+            cmds.append(["bash", "-lc", bam_pipe])
+            cmds.append(["bash", "-lc", f"samtools index '{tag}.bam' || :"])
 
             # BED (assume 0-based; cols 2-3)
             bed_cmd = (
@@ -194,6 +203,53 @@ class RegionalizeStage(StageBase):
 
         return cmds
 
+    def _region_outputs_present(self, stage_dir: Path) -> bool:
+        """Return True if all per-region artifacts exist and are non-empty.
+
+        Checks that for every region in qc/regionalize/region_details.tsv, the
+        corresponding BAM and GTF files are present (and non-empty). BED is
+        optional for this completeness test.
+        """
+        details = stage_dir / "qc" / "region_details.tsv"
+        if not details.exists():
+            return False
+        try:
+            regions = []
+            with open(details) as fh:
+                next(fh, None)
+                for raw in fh:
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) < 3:
+                        continue
+                    chrom, s, e = parts[0], parts[1], parts[2]
+                    regions.append(f"{chrom}_{s}_{e}")
+            if not regions:
+                return False
+            for tag in regions:
+                bam = stage_dir / f"{tag}.bam"
+                gtf = stage_dir / f"{tag}.gtf"
+                if not (bam.exists() and bam.stat().st_size > 0 and gtf.exists() and gtf.stat().st_size > 0):
+                    return False
+            return True
+        except Exception:
+            return False
+
+    def _decide_action(self, stage_dir: Path, primary: Path, needs_qc: bool) -> StageAction:
+        """Override to force full run when region outputs are missing.
+
+        Reinstate may suggest QC-only when the primary exists but QC is missing.
+        For regionalize, we also require that per-region BAM/GTF files exist;
+        if they don't, force a full run to materialize them.
+        """
+        decision = super()._decide_action(stage_dir, primary, needs_qc)
+        if decision == StageAction.QC_ONLY and not self._region_outputs_present(stage_dir):
+            self.logger.info("Per-region artifacts missing; forcing full run")
+            return StageAction.RUN
+        return decision
+
     def run_tool(
         self,
         cmd: list[str],
@@ -225,6 +281,6 @@ class RegionalizeStage(StageBase):
             "region_bed": Path("{chrom}_{start}_{end}.bed"),
             "region_gtf": Path("{chrom}_{start}_{end}.gtf"),
             "region_fa": Path("{chrom}_{start}_{end}.fa"),
-            # Primary now lives under qc/regionalize
-            "region_details": Path("qc/regionalize/region_details.tsv"),
+            # Primary now lives under qc/
+            "region_details": Path("qc/region_details.tsv"),
         }

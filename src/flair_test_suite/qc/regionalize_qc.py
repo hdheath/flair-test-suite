@@ -144,7 +144,7 @@ def collect(
     import pandas as pd
 
     t0 = time.time()
-    base_dir = out_dir / "qc" / "regionalize"
+    base_dir = out_dir / "qc"
     details_path = base_dir / "region_details.tsv"
     if not details_path.exists():
         raise FileNotFoundError(f"Missing region details: {details_path}")

@@ -8,6 +8,7 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import math
 
 import numpy as np
 import pandas as pd
@@ -199,6 +200,186 @@ def _isoform_counts(iso_bed: Path) -> Tuple[int, int]:
     return n_iso, len(genes)
 
 
+def _read_isoform_coords(iso_bed: Path) -> Dict[str, Tuple[str, int, int, str]]:
+    """Return mapping isoform_name -> (chrom, tss, tts, strand) from BED.
+
+    Expects BED with at least 5 columns: chrom, start, end, name, strand.
+    """
+    try:
+        df = pd.read_csv(
+            iso_bed,
+            sep="\t",
+            header=None,
+            comment="#",
+            usecols=[0, 1, 2, 3, 5],
+            names=["Chrom", "Start", "End", "Name", "Strand"],
+            dtype={"Chrom": str, "Start": np.int64, "End": np.int64, "Name": str, "Strand": str},
+        )
+    except Exception:
+        return {}
+    iso_info: Dict[str, Tuple[str, int, int, str]] = {}
+    for _, r in df.iterrows():
+        chrom = str(r["Chrom"]) if pd.notna(r["Chrom"]) else None
+        strand = str(r["Strand"]) if pd.notna(r["Strand"]) else "."
+        start = int(r["Start"]) if pd.notna(r["Start"]) else 0
+        end = int(r["End"]) if pd.notna(r["End"]) else 0
+        name = str(r["Name"]).strip()
+        if not chrom or not name:
+            continue
+        tss = start if strand == "+" else end
+        tts = end if strand == "+" else start
+        iso_info[name] = (chrom, int(tss), int(tts), strand)
+    return iso_info
+
+
+def _entropy_from_counts(counts: List[int]) -> Optional[float]:
+    total = sum(counts)
+    if total <= 0:
+        return None
+    h = 0.0
+    for c in counts:
+        if c <= 0:
+            continue
+        p = c / total
+        h -= p * math.log2(p)
+    return h
+
+
+def _parse_iso_to_reads(map_path: Path) -> Dict[str, set]:
+    iso_to_reads: Dict[str, set] = {}
+    if not map_path.exists() or map_path.stat().st_size == 0:
+        return iso_to_reads
+    with open(map_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or "\t" not in line:
+                continue
+            left, rhs = line.split("\t", 1)
+            iso = left.strip()
+            reads = {r.strip() for r in rhs.split(",") if r.strip()}
+            if reads:
+                iso_to_reads.setdefault(iso, set()).update(reads)
+    return iso_to_reads
+
+
+def _collect_read_coords_from_bam(
+    bam_path: Optional[Path],
+    chrom: str,
+    region_start: Optional[int],
+    region_end: Optional[int],
+    read_names_needed: set,
+) -> Dict[str, Tuple[str, int, int, str]]:
+    coords: Dict[str, Tuple[str, int, int, str]] = {}
+    if not bam_path or not bam_path.exists() or not read_names_needed:
+        return coords
+    try:
+        import pysam
+    except Exception:
+        return coords
+    try:
+        with pysam.AlignmentFile(str(bam_path), "rb") as bf:
+            iterator = (
+                bf.fetch(chrom, region_start, region_end)
+                if (region_start is not None and region_end is not None)
+                else bf.fetch()
+            )
+            for rd in iterator:
+                if rd.is_unmapped or rd.is_secondary or rd.is_supplementary:
+                    continue
+                qn = rd.query_name
+                if qn not in read_names_needed:
+                    continue
+                start = rd.reference_start
+                end = rd.reference_end - 1 if rd.reference_end is not None else rd.reference_end
+                strand = '-' if rd.is_reverse else '+'
+                tss = start if strand == '+' else end
+                tts = end if strand == '+' else start
+                coords[qn] = (bf.get_reference_name(rd.reference_id), int(tss), int(tts), strand)
+                if len(coords) >= len(read_names_needed):
+                    break
+    except Exception:
+        return coords
+    return coords
+
+
+def _alignment_category_stats(
+    bam_path: Optional[Path],
+    chrom: str,
+    region_start: Optional[int],
+    region_end: Optional[int],
+    assigned_reads: set,
+) -> Dict[str, Optional[float]]:
+    """Compute alignment category stats (primary/secondary/supplementary).
+
+    Returns counts and assigned proportions at two levels:
+      - alignment-level: fraction of alignments in category from assigned reads
+      - read-level: fraction of unique reads in category that are assigned
+    Keys:
+      primary_align_total, primary_align_assigned, primary_align_assigned_prop,
+      secondary_align_total, ..., supplementary_align_assigned_prop,
+      primary_read_total, primary_read_assigned, primary_read_assigned_prop, ...
+    """
+    stats: Dict[str, Optional[float] | int] = {}
+    if not bam_path or not bam_path.exists():
+        return stats
+    try:
+        import pysam
+    except Exception:
+        return stats
+
+    align_tot = {"primary": 0, "secondary": 0, "supplementary": 0}
+    align_assn = {"primary": 0, "secondary": 0, "supplementary": 0}
+    reads_tot = {"primary": set(), "secondary": set(), "supplementary": set()}
+    reads_assn = {"primary": set(), "secondary": set(), "supplementary": set()}
+    try:
+        with pysam.AlignmentFile(str(bam_path), "rb") as bf:
+            iterator = (
+                bf.fetch(chrom, region_start, region_end)
+                if (region_start is not None and region_end is not None)
+                else bf.fetch()
+            )
+            for rd in iterator:
+                # Skip unmapped, QC-fail, and PCR/optical duplicates
+                if rd.is_unmapped or getattr(rd, "is_qcfail", False) or getattr(rd, "is_duplicate", False):
+                    continue
+                # Category precedence: supplementary > secondary > primary
+                # (Supplementary alignments should not be counted as secondary.)
+                if rd.is_supplementary:
+                    cat = "supplementary"
+                elif rd.is_secondary:
+                    cat = "secondary"
+                else:
+                    cat = "primary"
+                align_tot[cat] += 1
+                qn = rd.query_name
+                reads_tot[cat].add(qn)
+                if qn in assigned_reads:
+                    align_assn[cat] += 1
+                    reads_assn[cat].add(qn)
+    except Exception:
+        return stats
+
+    for cat in ("primary", "secondary", "supplementary"):
+        stats[f"{cat}_align_total"] = align_tot[cat]
+        stats[f"{cat}_align_assigned"] = align_assn[cat]
+        denom_a = align_tot[cat]
+        stats[f"{cat}_align_assigned_prop"] = (
+            (align_assn[cat] / denom_a) if denom_a > 0 else None
+        )
+        stats[f"{cat}_read_total"] = len(reads_tot[cat])
+        stats[f"{cat}_read_assigned"] = len(reads_assn[cat])
+        denom_r = len(reads_tot[cat])
+        stats[f"{cat}_read_assigned_prop"] = (
+            (len(reads_assn[cat]) / denom_r) if denom_r > 0 else None
+        )
+    # Region-level unique reads considered (union across categories)
+    union_tot = set().union(*reads_tot.values())
+    union_assn = set().union(*reads_assn.values())
+    stats["region_read_total"] = len(union_tot)
+    stats["region_read_assigned_total"] = len(union_assn)
+    return stats  # type: ignore[return-value]
+
+
 def _read_map_unique_reads(map_path: Path) -> int:
     """Count unique read IDs across all isoforms in *.isoform.read.map.txt."""
     if not map_path.exists() or map_path.stat().st_size == 0:
@@ -300,9 +481,10 @@ def _synthesize_mapping_from_map_and_bam(
         logger.warning(f"[TED] Error reading BAM while synthesizing mapping: {e}")
         return None
 
-    # Build mapping rows per-isoform
+    # Build mapping rows per-isoform (add per-isoform metrics)
     rows = []
     from collections import Counter
+    iso_info_map = _read_isoform_coords(iso_bed)
     for iso, reads in iso_to_reads.items():
         coords = [read_coords[r] for r in reads if r in read_coords]
         if not coords:
@@ -327,11 +509,33 @@ def _synthesize_mapping_from_map_and_bam(
         most_freq_coord = f"{chrom}:{most_tss}"
         all_tx_ids = iso
         joint_window = f"{tss_min_p}-{tss_max_p}|{tts_min_p}-{tts_max_p}"
+        # Per-isoform entropy of read TSS/TTS positions
+        tss_counts = list(Counter(tss_list).values())
+        tts_counts = list(Counter(tts_list).values())
+        tss_read_entropy = _entropy_from_counts(tss_counts)
+        tts_read_entropy = _entropy_from_counts(tts_counts)
+        # Per-isoform average absolute difference vs. model TSS/TTS if available
+        avg_tss_diff = None
+        avg_tts_diff = None
+        model = iso_info_map.get(iso)
+        if model:
+            _c, model_tss, model_tts, _s = model
+            if len(coords) > 0:
+                try:
+                    avg_tss_diff = float(np.mean([abs(int(x) - int(model_tss)) for x in tss_list]))
+                    avg_tts_diff = float(np.mean([abs(int(x) - int(model_tts)) for x in tts_list]))
+                except Exception:
+                    pass
         rows.append({
             "most_freq_coord": most_freq_coord,
             "all_tx_ids": all_tx_ids,
             "joint_window": joint_window,
             "strand": strand_mode,
+            "read_count": len(coords),
+            "tss_read_entropy": tss_read_entropy,
+            "tts_read_entropy": tts_read_entropy,
+            "avg_read_tss_to_model_diff": avg_tss_diff,
+            "avg_read_tts_to_model_diff": avg_tts_diff,
         })
 
     if not rows:
@@ -339,7 +543,12 @@ def _synthesize_mapping_from_map_and_bam(
         return None
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_p = out_dir / (map_path.stem + ".synth.mapping.tsv")
+    # Name the table as <tag>.isoform_metrics.tsv
+    try:
+        tag = iso_bed.stem.replace(".isoforms", "")
+    except Exception:
+        tag = map_path.stem
+    out_p = out_dir / f"{tag}.isoform_metrics.tsv"
     pd.DataFrame(rows).to_csv(out_p, sep="\t", index=False)
     logger.info(f"[TED] Wrote synthesized mapping TSV: {out_p}")
     return out_p
@@ -439,8 +648,15 @@ def _build_region_metrics_index(run_root: Path, regionalize_dir: Path | None = N
             return idx
         dirs = [d for d in regionalize_root.iterdir() if d.is_dir()]
     for d in dirs:
-        metrics = d / "region_metrics.tsv"
-        if not metrics.exists():
+        # regionalize QC writes metrics under qc/region_metrics.tsv (preferred)
+        # Backward compatibility: also look under qc/regionalize/region_metrics.tsv and stage root
+        candidates = [
+            d / "qc" / "region_metrics.tsv",
+            d / "qc" / "regionalize" / "region_metrics.tsv",
+            d / "region_metrics.tsv",
+        ]
+        metrics = next((p for p in candidates if p.exists()), None)
+        if not metrics:
             continue
         try:
             df = pd.read_csv(metrics, sep="\t")
@@ -627,9 +843,6 @@ def collect(
       - TED sidecar with simple totals (no means)
     Implements:
       * region_genes_expected / region_isoforms_expected via an index over ALL regionalize dirs
-      * assigned_pct denominator: 
-          - collapse: corrected BED line count (per-region if regionalized, else single)
-          - transcriptome: primary alignments in BAM (per-region regional BAM, else full align BAM)
     Parameters
     ----------
     stage_dir : Path
@@ -773,21 +986,22 @@ def collect(
             tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, f"region:{tag}")
             logging.debug(f"[TED] Region {tag} TSS/TTS metrics: {tss_tts}")
 
-            # Denominator per rule
-            if stage_name == "collapse":
-                corr_bed = _find_correct_bed_for_tag(run_root, tag)
-                if corr_bed is None:
-                    logging.warning(f"[TED] Corrected BED for {tag} not found; assigned_pct will be None")
-                    denom = None
-                else:
-                    denom = count_lines(corr_bed)
-                    logging.debug(f"[TED] For region {tag}, corrected BED: {corr_bed.name}, lines: {denom}")
-            else:
-                if reg_bam and reg_bam.exists():
-                    denom = _count_primary_alignments_bam(reg_bam)
-                else:
-                    logging.warning(f"[TED] Regional BAM for {tag} not found; assigned_pct will be None")
-                    denom = None
+            # ── Additional regionalized-only metrics ───────────────────────────
+            # Alignment category stats — potentially expensive. Gate by
+            # region span and number of assigned reads with sensible defaults
+            # and allow optional overrides via qc.<stage>.TED.
+            span = int(end_i - start_i + 1)
+            iso_to_reads = _parse_iso_to_reads(map_txt)
+            assigned_set = set(r for s in iso_to_reads.values() for r in s) if iso_to_reads else set()
+            # Defaults: skip extras if >20k reads or span >200kb
+            max_reads_default = 20000
+            max_span_default = 200000
+            enable_align_stats = bool(_cfg_get(cfg, ["qc", stage_name, "TED", "align_stats"], True))
+            max_reads = int(_cfg_get(cfg, ["qc", stage_name, "TED", "max_reads_for_diffs"], max_reads_default))
+            max_span = int(_cfg_get(cfg, ["qc", stage_name, "TED", "max_span_for_diffs"], max_span_default))
+            cat_stats: Dict[str, Optional[float]] = {}
+            if enable_align_stats and assigned_set and span <= max_span and len(assigned_set) <= max_reads:
+                cat_stats = _alignment_category_stats(reg_bam, chrom, start_i, end_i, assigned_set)
 
             row = {
                 "run_id": run_id,
@@ -799,10 +1013,9 @@ def collect(
                 "region_isoforms_expected": reg_tx_cnt,
                 "isoforms_observed": n_iso,
                 "genes_observed": n_genes_obs,
-                "assigned_primary_reads": int(assigned_reads),
-                "align_primary_total": int(denom) if (denom is not None) else None,
-                "assigned_pct": (assigned_reads / denom) if (denom and denom > 0) else None,
+                "assigned_read_total": len(assigned_set),
                 **tss_tts,
+                **cat_stats,
             }
             logging.debug(f"[TED] Region {tag} final row: {row}")
             if reg_dir_for_tag is None:
@@ -901,8 +1114,7 @@ def collect(
         if n_iso == 0:
             logger.warning(f"[TED] {iso_bed.name} contains 0 isoforms; "
                            "precision will be None for this row.")
-        assigned_reads = _read_map_unique_reads(map_txt)
-        logging.debug(f"[TED] Single mode - n_iso: {n_iso}, n_genes_obs: {n_genes_obs}, assigned_reads: {assigned_reads}")
+        logging.debug(f"[TED] Single mode - n_iso: {n_iso}, n_genes_obs: {n_genes_obs}")
 
         # peaks: global only
         peaks: Dict[str, Optional[Path]] = {}
@@ -923,22 +1135,11 @@ def collect(
         logging.debug("[TED] Single mode peaks resolved: %s", {k: str(v) if v else None for k, v in peaks.items()})
         tss_tts = _tss_tts_metrics_full(iso_bed, peaks, window, audit_rows, "single")
 
-        if stage_name == "collapse":
-            corr_bed = _find_correct_bed_single(run_root, run_id)
-            if corr_bed:
-                denom = count_lines(corr_bed)
-                logging.debug(f"[TED] Found single corrected BED: {corr_bed.name} with {denom} lines")
-            else:
-                logging.warning("[TED] Single corrected BED not found; assigned_pct will be None")
-                denom = None
-        else:
-            aln_bam = _find_align_bam(run_root, run_id)
-            if aln_bam:
-                denom = _count_primary_alignments_bam(aln_bam)
-                logging.debug(f"[TED] Found single align BAM: {aln_bam.name}")
-            else:
-                logging.warning("[TED] Align BAM not found; assigned_pct will be None")
-                denom = None
+        # Compute alignment category stats consistently
+        iso_to_reads_single = _parse_iso_to_reads(map_txt)
+        assigned_set_single = set(r for s in iso_to_reads_single.values() for r in s) if iso_to_reads_single else set()
+        aln_bam = _find_align_bam(run_root, run_id)
+        cat_stats_single = _alignment_category_stats(aln_bam, "", None, None, assigned_set_single)
 
         row = {
             "run_id": run_id,
@@ -949,17 +1150,36 @@ def collect(
             "region_isoforms_expected": None,
             "isoforms_observed": n_iso,
             "genes_observed": n_genes_obs,
-            "assigned_primary_reads": int(assigned_reads),
-            "align_primary_total": int(denom) if (denom is not None) else None,
-            "assigned_pct": (assigned_reads / denom) if (denom and denom > 0) else None,
+            "assigned_read_total": len(assigned_set_single),
             **tss_tts,
         }
+        # include alignment category stats for single mode as well
+        row.update(cat_stats_single)
         logging.debug(f"[TED] Single mode final row: {row}")
         rows.append(row)
 
     # write TSV
     out_tsv = out_dir / "TED.tsv"
     df = pd.DataFrame(rows)
+    # Enforce a stable, organized column order
+    preferred_cols = [
+        "run_id", "stage", "region_tag", "chrom", "start", "end", "span_bp",
+        "region_genes_expected", "region_isoforms_expected",
+        "isoforms_observed", "genes_observed",
+        "assigned_read_total", "region_read_total", "region_read_assigned_total",
+        "5prime_precision", "5prime_recall", "5prime_f1",
+        "3prime_precision", "3prime_recall", "3prime_f1",
+        "ref5prime_precision", "ref5prime_recall", "ref5prime_f1",
+        "ref3prime_precision", "ref3prime_recall", "ref3prime_f1",
+        "primary_align_total", "primary_align_assigned", "primary_align_assigned_prop",
+        "primary_read_total", "primary_read_assigned", "primary_read_assigned_prop",
+        "secondary_align_total", "secondary_align_assigned", "secondary_align_assigned_prop",
+        "secondary_read_total", "secondary_read_assigned", "secondary_read_assigned_prop",
+        "supplementary_align_total", "supplementary_align_assigned", "supplementary_align_assigned_prop",
+        "supplementary_read_total", "supplementary_read_assigned", "supplementary_read_assigned_prop",
+    ]
+    ordered = [c for c in preferred_cols if c in df.columns] + [c for c in df.columns if c not in preferred_cols]
+    df = df[ordered]
     if is_regionalized:
         df.to_csv(out_tsv, sep="\t", index=False)
     else:
