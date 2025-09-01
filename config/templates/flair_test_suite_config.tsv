@@ -1,0 +1,27 @@
+# Combined cases TSV template (two-section format)
+# -----------------------------------------------------------------------------
+# One file per test set. Paths resolve relative to this TSV file.
+# Flags are comma-separated CLI tokens (presence or key=value). Do not include
+# reserved IO flags (-r/--reads, -g/--genome, -q/--bed, -b/--bam, -o/--out).
+
+key	value
+test_set_id	WTC11_demo
+version	3.0.0
+flair_env	flair
+data_dir	/data/WTC11
+reads_file	reads.fastq.gz
+genome_fa	GRCh38.fa
+gtf	gencode.v48.gtf
+sqanti_env	sqanti
+
+# Optional: TED peak BEDs (enable precision/recall metrics)
+# experiment_5_prime_regions_bed_file	exp_TSS.bed
+# experiment_3_prime_regions_bed_file	exp_TES.bed
+# reference_5_prime_regions_bed_file	ref_TSS.bed
+# reference_3_prime_regions_bed_file	ref_TES.bed
+
+stage	flags
+align	--nvrna, --threads 8
+region_test	--regions-tsv regions.tsv
+correct	
+collapse	
