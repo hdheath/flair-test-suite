@@ -90,27 +90,37 @@ class RegionTestStage(StageBase):
         cfg = self.cfg
         data_dir = Path(cfg.run.data_dir)
 
-        # Upstream align
-        align_pb = self.upstreams.get("align")
-        if not align_pb:
-            raise RuntimeError("region_test requires align upstream")
-        self._align_bam = align_pb.stage_dir / f"{self.run_id}_flair.bam"
-        self._align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
-
         # Flags (raw CLI tokens) for this stage only
         stage_cfg = next(st for st in cfg.run.stages if st.name == "region_test")
         flags_map = _parse_tokens(getattr(stage_cfg, "flags", None))
+        # Determine overrides from flags only
+        bed_override = flags_map.get("bed")
+        bam_override = flags_map.get("bam")
+
+        # Upstream align (only required if overrides are not provided)
+        align_pb = self.upstreams.get("align")
+        if not align_pb and not (bed_override and bam_override):
+            raise RuntimeError("region_test requires align upstream or both --bed and --bam")
+
+        if align_pb:
+            self._align_bam = align_pb.stage_dir / f"{self.run_id}_flair.bam"
+            self._align_bed = align_pb.stage_dir / f"{self.run_id}_flair.bed"
+        else:
+            # Use user-provided overrides
+            self._align_bam = resolve_path(str(bam_override), data_dir=data_dir)
+            self._align_bed = resolve_path(str(bed_override), data_dir=data_dir)
+            self.logger.info("Using override BAM: %s", self._align_bam)
+            self.logger.info("Using override BED: %s", self._align_bed)
 
         gtf = getattr(cfg.run, "gtf", None)
         if not gtf:
             raise RuntimeError("No GTF specified in run-level inputs for region_test")
         self._gtf_path = resolve_path(gtf, data_dir=data_dir)
 
-        override_bed = flags_map.get("bed")
-        if override_bed:
-            self._bed_file = resolve_path(str(override_bed), data_dir=data_dir)
+        if bed_override:
+            self._bed_file = resolve_path(str(bed_override), data_dir=data_dir)
             self.logger.info("Using override BED: %s", self._bed_file)
-        elif self._align_bed.exists():
+        elif align_pb and self._align_bed.exists():
             self._bed_file = self._align_bed
             self.logger.info("Using align BED: %s", self._bed_file)
         else:
@@ -150,8 +160,11 @@ class RegionTestStage(StageBase):
         # Signature inputs
         self._hash_inputs = [
             self._align_bam, self._bed_file, self._gtf_path,
-            regions_tsv_path, align_pb.signature, *self._optional.values()
+            regions_tsv_path,
+            *self._optional.values()
         ]
+        if align_pb:
+            self._hash_inputs.append(align_pb.signature)
         if self._genome_fa_abs:
             self._hash_inputs.append(Path(self._genome_fa_abs))
 
@@ -191,13 +204,26 @@ class RegionTestStage(StageBase):
             ) % (chrom, start, end, str(self._bed_file), f"{tag}.bed", f"{tag}.bed", f"{tag}.bed")
             cmds.append(["bash", "-lc", bed_cmd])
 
-            # GTF (1-based; cols 4-5)
-            gtf_cmd = (
-                "awk -v c='%s' -v s=%d -v e=%d "
-                r" -F'\t' '($1==c) && ($4>=s) && ($5<=e){print}' "
-                "'%s' > '%s'; test -s '%s' || : > '%s'"
-            ) % (chrom, start, end, str(self._gtf_path), f"{tag}.gtf", f"{tag}.gtf", f"{tag}.gtf")
-            cmds.append(["bash", "-lc", gtf_cmd])
+            # GTF (1-based; cols 4-5), but restrict to transcripts fully contained in [start,end]
+            # Two-step AWK:
+            #  1) collect transcript_ids where the transcript feature is fully contained
+            #  2) output only features whose transcript_id is in that set and fully contained
+            tids_tmp = f"{tag}.tids.tmp"
+            awk_tids = (
+                "awk -v c='%s' -v s=%d -v e=%d -F'\t' "
+                "'($1==c) && ($3==\"transcript\") && ($4>=s) && ($5<=e) {"
+                " if (match($9, /transcript_id \"[^\"]+\"/)) {tid=substr($9, RSTART+15, RLENGTH-16); print tid} }' "
+                "'%s' | sort -u > '%s'"
+            ) % (chrom, start, end, str(self._gtf_path), tids_tmp)
+            cmds.append(["bash", "-lc", awk_tids])
+
+            awk_gtf = (
+                "awk -v c='%s' -v s=%d -v e=%d -F'\t' "
+                "'FNR==NR {a[$1]=1; next} ($1==c) && ($4>=s) && ($5<=e) {"
+                " if (match($9, /transcript_id \"[^\"]+\"/)) {tid=substr($9, RSTART+15, RLENGTH-16); if (tid in a) print} }' "
+                "'%s' '%s' > '%s'; test -s '%s' || : > '%s'; rm -f '%s'"
+            ) % (chrom, start, end, tids_tmp, str(self._gtf_path), f"{tag}.gtf", f"{tag}.gtf", f"{tag}.gtf", tids_tmp)
+            cmds.append(["bash", "-lc", awk_gtf])
 
             # FASTA slice (if genome)
             if self._genome_fa_abs:

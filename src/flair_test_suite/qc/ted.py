@@ -973,6 +973,13 @@ def collect(
             # peaks: prefer sliced if available, otherwise global run-level path
             peaks = {}
             for key, conf in peaks_cfg.items():
+                # Guard missing configuration: allow metrics to be None for this side
+                if not conf:
+                    logger.warning(
+                        f"[TED] Peaks config missing for key '{key}' in regionalized run; metrics will be None for this side."
+                    )
+                    peaks[key] = None
+                    continue
                 base = Path(conf).name
                 sliced = (reg_dir_for_tag / f"{tag}_{base}") if reg_dir_for_tag else None
                 logger.debug(f"[TED] Looking for sliced peak file for key '{key}': {sliced}")

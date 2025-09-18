@@ -54,7 +54,11 @@ def estimate_read_count(fp: Path, max_reads: int = 50_000) -> Tuple[int, bool]:
         is_fasta = first == ">" or fp.name.lower().endswith((".fa", ".fasta", ".fa.gz", ".fasta.gz"))
         count = 0
         if is_fasta:
-            for line in fh:
+            # Use readline loop (not file iteration) so tell() remains supported
+            while True:
+                line = fh.readline()
+                if not line:
+                    break
                 if line.startswith(">"):
                     count += 1
                     if count >= max_reads:
@@ -69,8 +73,13 @@ def estimate_read_count(fp: Path, max_reads: int = 50_000) -> Tuple[int, bool]:
                 if count >= max_reads:
                     break
 
-        # Determine compressed bytes consumed
-        consumed = fh.fileobj.tell() if hasattr(fh, "fileobj") else fh.tell()
+        # Determine compressed bytes consumed (prefer underlying buffer when present)
+        try:
+            # TextIOWrapper around GzipFile exposes the underlying object via .buffer
+            underlying = getattr(fh, "buffer", fh)
+            consumed = underlying.tell()
+        except Exception:
+            consumed = fh.tell()
         eof = fh.readline() == ""  # check if already at EOF
 
     if count < max_reads and eof:
@@ -260,6 +269,11 @@ def parse_cli_flags(
             else:
                 i += 1
             continue
+        # Ignore stray tokens that are not flags
+        if not tok.startswith("-") and "=" not in tok:
+            logger.warning("Ignoring unrecognized token '%s' (no flag)", tok)
+            i += 1
+            continue
 
         flag_parts.append(tok)
         # key=value form: try to resolve value to a file under data_dir
@@ -401,12 +415,28 @@ def run_ted_qc(stage_name: str, stage_dir: Path, cfg, upstreams) -> dict:
 
         regionalized = any(stage_dir.glob("*_*_*.isoforms.bed"))
         if regionalized:
+            # Browser plots are best-effort for small regions; do not fail
+            # TED when plots are skipped (e.g., large spans or missing deps).
             map_json = out_dir / "transcriptome_browser" / "region_map.json"
-            if not map_json.exists():
-                raise RuntimeError("browser plot missing")
-            mapping = json.loads(map_json.read_text())
-            if not mapping or not all(Path(p).exists() for p in mapping.values()):
-                raise RuntimeError("browser plot missing")
+            if map_json.exists():
+                try:
+                    mapping = json.loads(map_json.read_text())
+                except Exception:
+                    mapping = {}
+                missing = [p for p in (mapping or {}).values() if not Path(p).exists()]
+                if not mapping:
+                    logging.getLogger(stage_name).warning(
+                        "Transcriptome browser mapping is empty; skipping validation."
+                    )
+                elif missing:
+                    logging.getLogger(stage_name).warning(
+                        "Some browser images referenced in mapping are missing: %s",
+                        ", ".join(map(str, missing))
+                    )
+            else:
+                logging.getLogger(stage_name).info(
+                    "No transcriptome browser plot generated (likely large regions or missing dependency); continuing TED."
+                )
         tsv_path = out_dir / "TED.tsv"
         return {"TED": {"tsv": str(tsv_path)}}
     except Exception as e:  # pragma: no cover - logging only

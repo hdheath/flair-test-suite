@@ -37,6 +37,8 @@ class RunConfig(BaseModel):
     flair_env: str | None = None
     data_dir: str
 
+    # (Removed) direct align output overrides are no longer supported.
+
     # Accept str or list[str]; normalize to list[str]
     reads_file: Optional[List[str]] = None
 

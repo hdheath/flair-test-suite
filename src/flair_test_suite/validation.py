@@ -24,6 +24,42 @@ def _has_manifest_flag(st: StageConfig) -> bool:
     return False
 
 
+def _flags_dict(st: StageConfig) -> dict:
+    """Best-effort parse of a stage's flags into a dict-like mapping.
+
+    Supports dict, list[str], or comma-separated string. Values are strings when
+    provided as --key=value or "--key value"; bare flags map to True.
+    """
+    flags = getattr(st, "flags", None)
+    if isinstance(flags, dict):
+        # normalize keys to bare form
+        return {str(k).lstrip('-'): v for k, v in flags.items()}
+    toks: list[str]
+    if isinstance(flags, str):
+        toks = [t.strip() for t in flags.split(',') if t.strip()]
+    elif isinstance(flags, list):
+        toks = [str(t).strip() for t in flags if str(t).strip()]
+    else:
+        toks = []
+    out: dict[str, object] = {}
+    import shlex
+    for tok in toks:
+        parts = shlex.split(tok)
+        if not parts:
+            continue
+        head = parts[0]
+        if '=' in head:
+            k, v = head.lstrip('-').split('=', 1)
+            out[k] = v
+        else:
+            k = head.lstrip('-')
+            if len(parts) > 1 and not parts[1].startswith('-'):
+                out[k] = parts[1]
+            else:
+                out[k] = True
+    return out  # type: ignore[return-value]
+
+
 def validate_stage_order(cfg: Config) -> None:
     """Validate that stages listed in cfg.run.stages are executable in-order.
 
@@ -57,13 +93,19 @@ def validate_stage_order(cfg: Config) -> None:
     for st in stages:
         n = st.name
         if n == "region_test":
-            if "align" not in seen:
-                raise ValueError("region_test must appear after align in the TSV list")
+            # Allow starting at region_test when both BAM and BED are supplied via
+            # stage flags; otherwise require align first.
+            flags = _flags_dict(st)
+            have_overrides = bool(flags.get("bam") and flags.get("bed"))
+            if not have_overrides and "align" not in seen:
+                raise ValueError("region_test must appear after align, or provide both --bam and --bed")
         elif n == "correct":
             # correct must follow align (optionally regionalize) and cannot
             # follow any downstream aggregation/terminal stages
-            if "align" not in seen:
-                raise ValueError("correct must appear after align in the TSV list")
+            flags = _flags_dict(st)
+            have_bed_override = bool(flags.get("bed"))
+            if not have_bed_override and "align" not in seen:
+                raise ValueError("correct must appear after align, or provide --bed")
             forbidden = {"transcriptome", "collapse", "combine", "quantify"}
             bad = forbidden.intersection(seen)
             if bad:
@@ -76,8 +118,10 @@ def validate_stage_order(cfg: Config) -> None:
         elif n == "transcriptome":
             # transcriptome requires align and optionally regionalize, but must
             # NOT follow correct. Enforce align seen and no prior correct.
-            if "align" not in seen:
-                raise ValueError("transcriptome must appear after align (optionally after region_test) in the TSV list")
+            flags = _flags_dict(st)
+            have_bam_override = bool(flags.get("bam"))
+            if not have_bam_override and "align" not in seen:
+                raise ValueError("transcriptome must appear after align (or provide --bam); region_test may precede it")
             if "correct" in seen:
                 raise ValueError(
                     "transcriptome cannot follow correct; remove 'correct' or place 'transcriptome' before it"

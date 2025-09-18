@@ -12,6 +12,7 @@ data_dir	/data/WTC11
 reads_file	reads.fastq.gz
 genome_fa	GRCh38.fa
 gtf	gencode.v48.gtf
+junctions   WTC11_all.SJ.out.tab
 sqanti_env	sqanti
 
 # Optional: TED peak BEDs (enable precision/recall metrics)

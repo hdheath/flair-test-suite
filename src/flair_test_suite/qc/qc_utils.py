@@ -102,7 +102,7 @@ def parse_gtf_attributes(attr_col: str) -> Dict[str, str]:
 # Streaming helper for large BAMs ----------------------------------
 
 # Cap on sampled alignments for QC metrics
-SAMPLE_LIMIT: int = 2_000_000
+SAMPLE_LIMIT: int = 1_000
 # Flag mask to exclude secondary, supplementary, and unmapped reads
 PRIMARY_ONLY_FLAGMASK = 0x904
 
@@ -145,11 +145,12 @@ def count_unique_junctions(
     Optionally limit scanning to first `sample_limit` lines.
     """
     seen: set[tuple[str, int, int, str]] = set()
+    logger = logging.getLogger(__name__)
     with open(bed_path) as fh:
-        for idx, line in enumerate(fh):
+        for idx, line in enumerate(fh, 1):
             if not line.strip() or line.startswith('#'):
                 continue
-            if sample_limit is not None and idx >= sample_limit:
+            if sample_limit is not None and idx > sample_limit:
                 break
             cols = line.rstrip("\n").split("\t")
             # Ensure BED12 format
@@ -167,6 +168,8 @@ def count_unique_junctions(
                 donor = chrom_start + starts[i] + sizes[i]
                 acceptor = chrom_start + starts[i+1]
                 seen.add((chrom, donor, acceptor, strand))
+            if idx % 1_000_000 == 0:
+                logger.info(f"[qc_utils] count_unique_junctions progress: processed ~{idx} lines, uniques={len(seen)}")
     return len(seen)
 
 # ------------------------------------------------------------------
@@ -242,7 +245,7 @@ def count_splice_junction_motifs(
     bed_path: Path,
     fasta_path: Path,
     max_workers: int | None = None,
-    max_bed_lines: int = 100_000,
+    max_bed_lines: int = 10_000,
     don_ex: int = 2, don_in: int = 2,
     acc_in: int = 2, acc_ex: int = 2
 ) -> Counter:

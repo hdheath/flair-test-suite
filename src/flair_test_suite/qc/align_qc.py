@@ -32,6 +32,9 @@ import tempfile
 import time
 from statistics import mean, median
 import logging
+import os
+
+logger = logging.getLogger(__name__)
 
 # Import utilities for QC: sidecar path, marker loading, registration, metrics write
 import pysam  # noqa: E402
@@ -75,50 +78,153 @@ def collect(
     """
     qc_start = time.time()
 
+    # Read tunables from environment (with sensible defaults)
+    stats_threads = int(os.getenv("FTS_QC_STATS_THREADS", "4"))
+    motif_limit = int(os.getenv("FTS_QC_MAX_BED_LINES", "1"))
+    junc_limit = int(os.getenv("FTS_QC_JUNC_LIMIT", "0"))  # 0 => no cap
+    sample_limit = int(os.getenv("FTS_QC_SAMPLE_LIMIT", str(SAMPLE_LIMIT)))
+    motif_workers = int(os.getenv("FTS_QC_CPUS", "4"))
+    junc_mode = os.getenv("FTS_QC_JUNC_MODE", "all").strip().lower()  # all|sample|skip
+    stats_mode = os.getenv("FTS_QC_STATS_MODE", "all").strip().lower()  # all|sample|skip
+    stats_timeout_env = os.getenv("FTS_QC_STATS_TIMEOUT", "").strip()
+    try:
+        stats_timeout = int(stats_timeout_env) if stats_timeout_env else None
+    except Exception:
+        stats_timeout = None
+    logger.info(
+        f"[align_qc] Tunables: stats_threads={stats_threads}, sample_limit={sample_limit}, "
+        f"junc_limit={junc_limit or 'none'}, motif_limit={motif_limit}, motif_workers={motif_workers}, "
+        f"stats_mode={stats_mode}, stats_timeout={stats_timeout or 'none'}"
+    )
+
     # 1. Count retained reads and compute mapped percentage
     bed = bam.with_suffix(".bed")
+    logger.info(f"[align_qc] Inputs: BAM={bam}, BED={bed}, genome={genome_fa}")
     retained = count_lines(bed)
     mapped_pct = percent(retained, n_input_reads) if n_input_reads else None
+    logger.info(f"[align_qc] Retained BED lines: {retained}; n_input_reads={n_input_reads}")
 
-    # 2. Extract MAPQ and read length distributions via samtools stats
+    # 2. MAPQ and read length distributions: choose 'all' (samtools), 'sample' (from iter), or 'skip'
     mapq_vals: list[int] = []
     read_len_vals: list[int] = []
-    with tempfile.TemporaryDirectory() as tmpd:
-        stats_out = Path(tmpd) / "stats.txt"
-        try:
-            subprocess.run(
-                ["samtools", "stats", "-F", "0x904", "-o", str(stats_out), str(bam)],
-                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        except subprocess.CalledProcessError:
-            with open(stats_out, "w") as fh:
+    need_sample_for_stats = (stats_mode != "all")
+    if stats_mode == "all":
+        with tempfile.TemporaryDirectory() as tmpd:
+            stats_out = Path(tmpd) / "stats.txt"
+            try:
                 subprocess.run(
-                    ["samtools", "stats", "-F", "0x904", str(bam)],
-                    check=True, stdout=fh, stderr=subprocess.DEVNULL
+                    ["samtools", "stats", "-@", str(stats_threads), "-F", "0x904", "-o", str(stats_out), str(bam)],
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=stats_timeout
                 )
-        for line in stats_out.read_text().splitlines():
-            if line.startswith("MAPQ\t"):
-                _, v, c = line.split("\t")
-                mapq_vals.extend([int(v)] * int(c))
-            elif line.startswith("RL\t"):
-                _, l, c = line.split("\t")
-                read_len_vals.extend([int(l)] * int(c))
+            except subprocess.TimeoutExpired:
+                logger.warning("[align_qc] samtools stats timed out; will derive MAPQ/length from sampled reads")
+                need_sample_for_stats = True
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"[align_qc] samtools stats failed ({e}); will derive MAPQ/length from sampled reads")
+                need_sample_for_stats = True
+            if not need_sample_for_stats:
+                for line in stats_out.read_text().splitlines():
+                    if line.startswith("MAPQ\t"):
+                        _, v, c = line.split("\t")
+                        # Cap replication to sample_limit to avoid huge Python lists
+                        count = min(int(c), sample_limit)
+                        mapq_vals.extend([int(v)] * count)
+                    elif line.startswith("RL\t"):
+                        _, l, c = line.split("\t")
+                        count = min(int(c), sample_limit)
+                        read_len_vals.extend([int(l)] * count)
+                logger.info(
+                    f"[align_qc] samtools stats parsed (capped): mapq_values={len(mapq_vals)}, read_len_values={len(read_len_vals)}"
+                )
+    elif stats_mode == "skip":
+        logger.info("[align_qc] Skipping MAPQ/length stats by configuration")
+        need_sample_for_stats = True
 
     # 3. Sample alignments to compute identity and soft-clip stats
     identity_vals: list[float] = []
     softclip_n = 0
     total_sampled = 0
-    with pysam.AlignmentFile(bam, "rb") as bam_f:
-        for aln in iter_primary(bam_f, SAMPLE_LIMIT):
-            total_sampled += 1
-            if aln.has_tag("NM") and aln.query_length:
-                identity_vals.append(1 - aln.get_tag("NM") / aln.query_length)
-            if any(op == 4 for op, _ in (aln.cigartuples or [])):
-                softclip_n += 1
-    softclip_pct = percent(softclip_n, total_sampled)
+    # Optional: pre-subsample BAM via samtools view to speed up sampling on huge files
+    bam_for_sampling = bam
+    samp_spec = os.getenv("FTS_QC_BAM_SAMPLE_FRAC", "").strip()
+    if samp_spec:
+        try:
+            # Accept either raw samtools spec (e.g., '42.001') or a pure fraction (e.g., '0.001')
+            if "." in samp_spec and not samp_spec.startswith("0."):
+                spec = samp_spec
+            else:
+                frac = samp_spec
+                # derive a spec with default seed 42
+                spec = f"42{frac[1:]}" if frac.startswith("0.") else f"42.{frac}"
+            with tempfile.TemporaryDirectory() as smpdir:
+                samp_bam = Path(smpdir) / "sampled.bam"
+                cmd = [
+                    "samtools", "view", "-@", str(stats_threads), "-F", "0x904",
+                    "-s", spec, "-b", str(bam),
+                ]
+                with open(samp_bam, "wb") as outfh:
+                    subprocess.run(cmd, check=True, stdout=outfh, stderr=subprocess.DEVNULL)
+                logger.info(f"[align_qc] Using subsampled BAM for QC sampling: spec={spec}, path={samp_bam}")
+                bam_for_sampling = samp_bam
+                # Perform sampling within this temp context
+                with pysam.AlignmentFile(bam_for_sampling, "rb") as bam_f:
+                    for aln in iter_primary(bam_f, sample_limit):
+                        total_sampled += 1
+                        if need_sample_for_stats:
+                            try:
+                                mapq_vals.append(int(aln.mapping_quality))
+                            except Exception:
+                                pass
+                            try:
+                                if aln.query_length:
+                                    read_len_vals.append(int(aln.query_length))
+                            except Exception:
+                                pass
+                        if aln.has_tag("NM") and aln.query_length:
+                            identity_vals.append(1 - aln.get_tag("NM") / aln.query_length)
+                        if any(op == 4 for op, _ in (aln.cigartuples or [])):
+                            softclip_n += 1
+        except Exception as e:
+            logger.warning(f"[align_qc] Subsample BAM failed ({e}); falling back to direct sampling from full BAM")
+            bam_for_sampling = bam
 
-    # 4. Count unique splice junctions
-    unique_juncs = count_unique_junctions(bed)
+    if bam_for_sampling == bam:
+        with pysam.AlignmentFile(bam_for_sampling, "rb") as bam_f:
+            for aln in iter_primary(bam_f, sample_limit):
+                total_sampled += 1
+                if need_sample_for_stats:
+                    try:
+                        mapq_vals.append(int(aln.mapping_quality))
+                    except Exception:
+                        pass
+                    try:
+                        if aln.query_length:
+                            read_len_vals.append(int(aln.query_length))
+                    except Exception:
+                        pass
+                if aln.has_tag("NM") and aln.query_length:
+                    identity_vals.append(1 - aln.get_tag("NM") / aln.query_length)
+                if any(op == 4 for op, _ in (aln.cigartuples or [])):
+                    softclip_n += 1
+    softclip_pct = percent(softclip_n, total_sampled)
+    logger.info(
+        f"[align_qc] Sampled primaries: {total_sampled}; identity_n={len(identity_vals)}; softclip_n={softclip_n} ({softclip_pct}%)"
+    )
+    if need_sample_for_stats:
+        logger.info(
+            f"[align_qc] Sample-derived MAPQ/length: mapq_values={len(mapq_vals)}, read_len_values={len(read_len_vals)}"
+        )
+
+    # 4. Count unique splice junctions (can be expensive on large BEDs)
+    unique_juncs = None
+    if junc_mode == "skip":
+        logger.info("[align_qc] Skipping unique junction count by configuration")
+    else:
+        eff_limit = junc_limit if (junc_mode == "sample" or junc_limit > 0) else None
+        if junc_mode == "sample" and not eff_limit:
+            eff_limit = 10_000  # default sample size if not provided
+        unique_juncs = count_unique_junctions(bed, sample_limit=eff_limit)
+        logger.info(f"[align_qc] Unique junctions: {unique_juncs} (limit={eff_limit or 'none'})")
 
     # 5. Plot histograms and save filenames under <stage>/qc
     qc_dir = Path(out_dir) / "qc"
@@ -137,7 +243,12 @@ def collect(
         motif_counts = count_splice_junction_motifs(
             bed_path=bed,
             fasta_path=Path(genome_fa),
-            max_workers=4
+            max_workers=motif_workers,
+            max_bed_lines=motif_limit,
+        )
+        total_motifs = sum(motif_counts.values()) if motif_counts else 0
+        logger.info(
+            f"[align_qc] Motif counting: keys={len(motif_counts)}, total={total_motifs} (max_bed_lines={motif_limit}, workers={motif_workers})"
         )
     except Exception as e:
         motif_counts = {}

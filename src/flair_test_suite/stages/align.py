@@ -12,7 +12,7 @@ from pathlib import Path # for filesystem paths
 
 from .base import StageBase       # base class providing orchestration logic
 
-from .stage_utils import estimate_read_count, make_flair_cmd
+from .stage_utils import estimate_read_count, make_flair_cmd, get_stage_config, resolve_path
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,45 @@ class AlignStage(StageBase):
 
     def build_cmds(self) -> list[list[str]]:
         cfg = self.cfg
+
+        # Check for user-provided outputs to adopt instead of running FLAIR
+        stage_cfg = get_stage_config(cfg, self.name)
+        raw_flags = getattr(stage_cfg, "flags", None)
+        data_dir = Path(cfg.run.data_dir)
+        # Extract --skip value robustly (supports comma-separated BAM,BED and spaces)
+        adopt_bam = None
+        adopt_bed = None
+        import re
+        skip_arg: str | None = None
+        if isinstance(raw_flags, str):
+            # Capture text after --skip (with = or whitespace) up to end or comma followed by another flag
+            m = re.search(r"--skip(?:\s+|=)\s*([^,]+(?:,[^,][^,]*)?)(?=\s*,\s*--|$)", raw_flags)
+            if m:
+                skip_arg = m.group(1).strip()
+        elif isinstance(raw_flags, list):
+            # Find token that contains --skip, include subsequent non-flag token if present
+            for i, tok in enumerate(raw_flags):
+                if "--skip" in str(tok):
+                    try:
+                        parts = re.split(r"(?:\s+|=)", str(tok), maxsplit=1)
+                        val = parts[1].strip() if len(parts) > 1 else ""
+                    except Exception:
+                        val = ""
+                    # If next token looks like a path (no leading '-'), append with comma
+                    if (i + 1) < len(raw_flags) and not str(raw_flags[i + 1]).strip().startswith("-"):
+                        if val:
+                            val = f"{val},{str(raw_flags[i + 1]).strip()}"
+                        else:
+                            val = str(raw_flags[i + 1]).strip()
+                    skip_arg = val.strip()
+                    break
+        # Resolve paths from skip_arg if available
+        if skip_arg:
+            parts = [p.strip() for p in skip_arg.split(",") if p.strip()]
+            if len(parts) == 2:
+                adopt_bam = resolve_path(parts[0], data_dir=data_dir)
+                adopt_bed = resolve_path(parts[1], data_dir=data_dir)
+                logger.info(f"[align] --skip detected; adopting BAM={adopt_bam}, BED={adopt_bed}")
 
         # --- resolve input paths ---
         raw_reads = getattr(cfg, "reads_file", None) or cfg.run.reads_file
@@ -56,7 +95,7 @@ class AlignStage(StageBase):
 
         # --- parse flags and extra inputs ---
         # Disallow user-provided core IO flags; harness sets these
-        reserved = ("r", "reads", "g", "genome", "q", "bed", "b", "bam", "o", "out")
+        reserved = ("r", "reads", "g", "genome", "q", "bed", "b", "bam", "o", "out", "skip")
         flag_parts, extra_inputs = self.resolve_stage_flags(reserved=reserved)
         self._hash_inputs.extend(extra_inputs)
         self._flags_components = flag_parts
@@ -77,6 +116,31 @@ class AlignStage(StageBase):
 
         if not flag_parts:
             logger.warning("No extra flags configured for align stage; using defaults")
+
+        # If both BAM and BED are provided, adopt them and skip running FLAIR.
+        # Materialize symlinks in the stage dir so downstreams discover them.
+        if adopt_bam and adopt_bed:
+            out_prefix = f"{self.run_id}_flair"
+            ln_cmd = [
+                "bash", "-lc",
+                (
+                    f"ln -sfn '{adopt_bam}' '{out_prefix}.bam'; "
+                    f"ln -sfn '{adopt_bed}' '{out_prefix}.bed'"
+                ),
+            ]
+            logger.info(f"[align] Linking adopted outputs into stage dir with prefix {out_prefix}")
+            # Signature inputs reflect overrides + genome + reads + any extra inputs
+            self._hash_inputs = [genome, *resolved_reads]
+            if adopt_bam:
+                self._hash_inputs.append(Path(adopt_bam))
+            if adopt_bed:
+                self._hash_inputs.append(Path(adopt_bed))
+            # No extra flags forwarded; keep the normalized (non-reserved) ones for signature
+            reserved = ("r", "reads", "g", "genome", "q", "bed", "b", "bam", "o", "out", "skip")
+            flag_parts, extra_inputs = self.resolve_stage_flags(reserved=reserved)
+            self._flags_components = flag_parts
+            self._hash_inputs.extend(extra_inputs)
+            return [ln_cmd]
 
         # --- construct and return the final command list ---
         out_prefix = f"{self.run_id}_flair"
